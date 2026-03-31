@@ -74,8 +74,8 @@ export function attackSystem(world: World) {
     timeLeft: PROJECTILE_LIFETIME,
   });
   world.addComponent(projectile, "SpriteComponent", {
-    width: 32,
-    height: 32,
+    width: 24,
+    height: 24,
     anchor: 0.5,
   });
 

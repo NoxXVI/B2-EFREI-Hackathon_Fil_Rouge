@@ -17,6 +17,19 @@ export const GameCanvas = () => {
   const appRef = useRef<Application | null>(null);
   const [health, setHealth] = useState(3);
   const arrowTextureRef = useRef<Texture | null>(null);
+  const [mouseX, setMouseX] = useState(400);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      const canvas = document.getElementById("pixi-container");
+      if (canvas) {
+        const rect = canvas.getBoundingClientRect();
+        setMouseX(e.clientX - rect.left);
+      }
+    };
+    window.addEventListener("mousemove", handleMouseMove);
+    return () => window.removeEventListener("mousemove", handleMouseMove);
+  }, []);
 
   useEffect(() => {
     const init = async () => {
@@ -88,8 +101,6 @@ export const GameCanvas = () => {
             ) {
               sprite = new Sprite(arrowTextureRef.current);
               sprite.anchor.set(spriteComp.anchor);
-              sprite.width = spriteComp.width;
-              sprite.height = spriteComp.height;
               container.addChild(sprite);
               spritesRef.current.set(entityId, sprite);
             } else {
@@ -126,6 +137,13 @@ export const GameCanvas = () => {
               }>(entityId, "Velocity");
               if (vel) {
                 sprite.rotation = Math.atan2(vel.vy, vel.vx);
+              }
+            } else if (engine.world.hasComponent(entityId, "PlayerTag")) {
+              const playerPos = pos;
+              if (mouseX < playerPos.x) {
+                sprite.scale.x = -2;
+              } else {
+                sprite.scale.x = 2;
               }
             }
           }
