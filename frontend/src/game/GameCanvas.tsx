@@ -64,7 +64,7 @@ export const GameCanvas = () => {
 
         const engine = engineRef.current;
 
-        const players = engine.world.query(["PlayerTag", "Health"]);
+        const players = engine.world.query(["PlayerTag", "Health", "Position"]);
         if (players.length > 0) {
           const playerHealth = engine.world.getComponent<Health>(
             players[0],
@@ -73,6 +73,12 @@ export const GameCanvas = () => {
           if (playerHealth) {
             setHealth(playerHealth.current);
           }
+
+          const playerPos = engine.world.getComponent<Position>(
+            players[0],
+            "Position",
+          )!;
+          container.position.set(400 - playerPos.x, 300 - playerPos.y);
         } else {
           setHealth(0);
         }
