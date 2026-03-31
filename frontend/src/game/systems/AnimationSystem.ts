@@ -1,7 +1,12 @@
 import * as PIXI from "pixi.js";
 import { World, Entity } from "../ecs/World";
-import { Position, Velocity } from "./components";
-import { SpriteAnimation, AnimationName, SpriteManifest, AnimationConfig, animationLoader } from "../components/Animation";
+import {
+  SpriteAnimation,
+  AnimationName,
+  SpriteManifest,
+  AnimationConfig,
+  animationLoader,
+} from "../components/Animation";
 
 export interface AnimationState {
   current: AnimationName;
@@ -11,22 +16,25 @@ export interface AnimationState {
 
 export class AnimationSystem {
   private animations = new Map<Entity, AnimationState>();
-  private animationData = new Map<Entity, Map<AnimationName, SpriteAnimation>>();
+  private animationData = new Map<
+    Entity,
+    Map<AnimationName, SpriteAnimation>
+  >();
 
   async loadAnimations(
     entity: Entity,
     manifest: SpriteManifest,
-    config: Partial<Record<AnimationName, AnimationConfig>>
+    config: Partial<Record<AnimationName, AnimationConfig>>,
   ) {
     const animMap = new Map<AnimationName, SpriteAnimation>();
     const defaultConfig: AnimationConfig = { speed: 10, loop: true };
 
-    for (const animName of Object.keys(manifest)) {
+    for (const animName of Object.keys(manifest) as AnimationName[]) {
       const animConfig = config[animName] ?? defaultConfig;
       const animation = await animationLoader.loadAnimation(
         manifest,
         animName as AnimationName,
-        animConfig
+        animConfig,
       );
       animMap.set(animName as AnimationName, animation);
     }

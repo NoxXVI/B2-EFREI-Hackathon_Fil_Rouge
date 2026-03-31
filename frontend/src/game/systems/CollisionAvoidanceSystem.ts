@@ -6,7 +6,7 @@ const SEPARATION_FORCE = 150;
 
 export function collisionAvoidanceSystem(world: World) {
   const entities = world.query(["Position", "Velocity", "EnemyTag"]);
-  const positions = entities.map(id => ({
+  const positions = entities.map((id) => ({
     id,
     pos: world.getComponent<Position>(id, "Position")!,
     vel: world.getComponent<Velocity>(id, "Velocity")!,
@@ -19,7 +19,7 @@ export function collisionAvoidanceSystem(world: World) {
 
     for (let j = 0; j < positions.length; j++) {
       if (i === j) continue;
-      
+
       const b = positions[j];
       const dx = a.pos.x - b.pos.x;
       const dy = a.pos.y - b.pos.y;

@@ -4,6 +4,12 @@ import { enemyFollowSystem } from "./systems/EnemyFollowSystem";
 import { playerInputSystem } from "./systems/PlayerInputSystem";
 import { collisionAvoidanceSystem } from "./systems/CollisionAvoidanceSystem";
 import { healthSystem, checkDeath } from "./systems/HealthSystem";
+import {
+  attackSystem,
+  getAttackTriggered,
+  cleanupDeadEntities,
+  projectileSystem,
+} from "./systems/AttackSystem";
 import { AnimationSystem } from "./systems/AnimationSystem";
 import { Position, Velocity, SpriteComponent, Health } from "./components";
 import { SpriteManifest } from "./components/Animation";
@@ -34,24 +40,24 @@ export class GameEngine {
     const player = this.world.createEntity();
     this.world.addComponent(player, "PlayerTag", {});
     this.world.addComponent<Position>(player, "Position", { x: 400, y: 300 });
-    this.world.addComponent<Velocity>(player, "Velocity", { vx: 0, vy: 0, speed: 200 });
+    this.world.addComponent<Velocity>(player, "Velocity", {
+      vx: 0,
+      vy: 0,
+      speed: 200,
+    });
     this.world.addComponent<Health>(player, "Health", { current: 3, max: 3 });
     this.world.addComponent<SpriteComponent>(player, "SpriteComponent", {
       width: 48,
       height: 48,
-      anchor: 0.5
+      anchor: 0.5,
     });
 
-    await this.animationSystem.loadAnimations(
-      player,
-      createSoldierManifest(),
-      {
-        idle: { speed: 1, loop: true },
-        walk: { speed: 10, loop: true },
-        attack: { speed: 15, loop: false },
-        death: { speed: 8, loop: false },
-      }
-    );
+    await this.animationSystem.loadAnimations(player, createSoldierManifest(), {
+      idle: { speed: 1, loop: true },
+      walk: { speed: 10, loop: true },
+      attack: { speed: 15, loop: false },
+      death: { speed: 8, loop: false },
+    });
 
     for (let i = 0; i < 10; i++) {
       const enemy = this.world.createEntity();
@@ -60,30 +66,34 @@ export class GameEngine {
         x: Math.random() * 800,
         y: Math.random() * 600,
       });
-      this.world.addComponent<Velocity>(enemy, "Velocity", { vx: 0, vy: 0, speed: 80 });
+      this.world.addComponent<Velocity>(enemy, "Velocity", {
+        vx: 0,
+        vy: 0,
+        speed: 80,
+      });
+      this.world.addComponent<Health>(enemy, "Health", { current: 3, max: 3 });
       this.world.addComponent<SpriteComponent>(enemy, "SpriteComponent", {
         width: 48,
         height: 48,
-        anchor: 0.5
+        anchor: 0.5,
       });
 
-      await this.animationSystem.loadAnimations(
-        enemy,
-        createOrcManifest(),
-        {
-          walk: { speed: 8, loop: true },
-        }
-      );
+      await this.animationSystem.loadAnimations(enemy, createOrcManifest(), {
+        walk: { speed: 8, loop: true },
+      });
     }
   }
 
   update(deltaMS: number) {
     playerInputSystem(this.world);
+    attackSystem(this.world);
+    projectileSystem(this.world);
     enemyFollowSystem(this.world);
     collisionAvoidanceSystem(this.world);
     movementSystem(this.world, deltaMS);
     healthSystem(this.world, deltaMS);
     checkDeath(this.world);
+    cleanupDeadEntities(this.world);
     this.animationSystem.update(this.world, deltaMS);
     this.updateAnimations();
   }
@@ -92,7 +102,9 @@ export class GameEngine {
     const players = this.world.query(["PlayerTag", "Velocity"]);
     for (const player of players) {
       const vel = this.world.getComponent<Velocity>(player, "Velocity")!;
-      if (vel.vx !== 0 || vel.vy !== 0) {
+      if (getAttackTriggered()) {
+        this.animationSystem.setAnimation(player, "attack");
+      } else if (vel.vx !== 0 || vel.vy !== 0) {
         this.animationSystem.setAnimation(player, "walk");
       } else {
         this.animationSystem.setAnimation(player, "idle");

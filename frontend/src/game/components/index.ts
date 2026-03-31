@@ -26,5 +26,10 @@ export interface SpriteComponent {
   anchor: number;
 }
 
-export interface PlayerTag {}
-export interface EnemyTag {}
+export type PlayerTag = Record<string, never>;
+export type EnemyTag = Record<string, never>;
+export type ProjectileTag = Record<string, never>;
+
+export type TimerComponent = {
+  timeLeft: number;
+};

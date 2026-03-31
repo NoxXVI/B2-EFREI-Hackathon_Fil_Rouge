@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { Application, Sprite, Ticker } from "pixi.js";
+import {
+  Application,
+  Sprite,
+  Ticker,
+  SCALE_MODES,
+  Assets,
+  Texture,
+} from "pixi.js";
 import { GameEngine } from "./GameEngine";
 import { Position, Health } from "./components";
 
@@ -9,15 +16,20 @@ export const GameCanvas = () => {
   const spritesRef = useRef<Map<number, Sprite>>(new Map());
   const appRef = useRef<Application | null>(null);
   const [health, setHealth] = useState(3);
+  const arrowTextureRef = useRef<Texture | null>(null);
 
   useEffect(() => {
     const init = async () => {
+      const arrowTex = await Assets.load("/assets/projectile/arrow.png");
+      arrowTex.baseTexture.scaleMode = SCALE_MODES.NEAREST;
+      arrowTextureRef.current = arrowTex;
+
       const engine = new GameEngine();
       engineRef.current = engine;
-      
+
       const app = new Application();
       appRef.current = app;
-      
+
       await app.init({
         width: 800,
         height: 600,
@@ -29,19 +41,22 @@ export const GameCanvas = () => {
       const container = new Sprite();
       app.stage.addChild(container);
 
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise((resolve) => setTimeout(resolve, 500));
 
       const ticker = Ticker.shared;
-      
+
       const update = () => {
         if (!engineRef.current) return;
         engineRef.current.update(ticker.deltaMS);
 
         const engine = engineRef.current;
-        
+
         const players = engine.world.query(["PlayerTag", "Health"]);
         if (players.length > 0) {
-          const playerHealth = engine.world.getComponent<Health>(players[0], "Health");
+          const playerHealth = engine.world.getComponent<Health>(
+            players[0],
+            "Health",
+          );
           if (playerHealth) {
             setHealth(playerHealth.current);
           }
@@ -54,26 +69,47 @@ export const GameCanvas = () => {
 
         for (const entityId of entities) {
           activeEntityIds.add(entityId);
-          const pos = engine.world.getComponent<Position>(entityId, "Position")!;
-          const spriteComp = engine.world.getComponent<{width: number, height: number, anchor: number}>(entityId, "SpriteComponent")!;
+          const pos = engine.world.getComponent<Position>(
+            entityId,
+            "Position",
+          )!;
+          const spriteComp = engine.world.getComponent<{
+            width: number;
+            height: number;
+            anchor: number;
+          }>(entityId, "SpriteComponent")!;
 
           let sprite = spritesRef.current.get(entityId);
 
           if (!sprite) {
-            const texture = engine.animationSystem.getCurrentTexture(entityId);
-            if (texture) {
-              texture.baseTexture.scaleMode = 1;
-              sprite = new Sprite(texture);
+            if (
+              engine.world.hasComponent(entityId, "ProjectileTag") &&
+              arrowTextureRef.current
+            ) {
+              sprite = new Sprite(arrowTextureRef.current);
               sprite.anchor.set(spriteComp.anchor);
               sprite.width = spriteComp.width;
               sprite.height = spriteComp.height;
               container.addChild(sprite);
               spritesRef.current.set(entityId, sprite);
+            } else {
+              const animTexture =
+                engine.animationSystem.getCurrentTexture(entityId);
+              if (animTexture) {
+                animTexture.baseTexture.scaleMode = SCALE_MODES.NEAREST;
+                sprite = new Sprite(animTexture);
+                sprite.anchor.set(spriteComp.anchor);
+                sprite.width = spriteComp.width;
+                sprite.height = spriteComp.height;
+                container.addChild(sprite);
+                spritesRef.current.set(entityId, sprite);
+              }
             }
           } else {
-            const newTexture = engine.animationSystem.getCurrentTexture(entityId);
+            const newTexture =
+              engine.animationSystem.getCurrentTexture(entityId);
             if (newTexture) {
-              newTexture.baseTexture.scaleMode = 1;
+              newTexture.baseTexture.scaleMode = SCALE_MODES.NEAREST;
               if (sprite.texture !== newTexture) {
                 sprite.texture = newTexture;
               }
@@ -82,6 +118,16 @@ export const GameCanvas = () => {
 
           if (sprite) {
             sprite.position.set(pos.x, pos.y);
+
+            if (engine.world.hasComponent(entityId, "ProjectileTag")) {
+              const vel = engine.world.getComponent<{
+                vx: number;
+                vy: number;
+              }>(entityId, "Velocity");
+              if (vel) {
+                sprite.rotation = Math.atan2(vel.vy, vel.vx);
+              }
+            }
           }
         }
 
@@ -109,19 +155,21 @@ export const GameCanvas = () => {
   return (
     <div style={{ position: "relative" }}>
       <div ref={containerRef} />
-      <div style={{ 
-        position: "absolute", 
-        top: 10, 
-        left: 10, 
-        display: "flex", 
-        gap: "8px" 
-      }}>
+      <div
+        style={{
+          position: "absolute",
+          top: 10,
+          left: 10,
+          display: "flex",
+          gap: "8px",
+        }}
+      >
         {[...Array(3)].map((_, i) => (
-          <span 
-            key={i} 
-            style={{ 
+          <span
+            key={i}
+            style={{
               fontSize: "24px",
-              opacity: i < health ? 1 : 0.3
+              opacity: i < health ? 1 : 0.3,
             }}
           >
             ❤️

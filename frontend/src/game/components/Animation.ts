@@ -24,10 +24,10 @@ export class AnimationLoader {
   async loadAnimation(
     manifest: SpriteManifest,
     animationName: AnimationName,
-    config: AnimationConfig
+    config: AnimationConfig,
   ): Promise<SpriteAnimation> {
     const key = `${JSON.stringify(manifest)}-${animationName}`;
-    
+
     if (this.cache.has(key)) {
       return this.cache.get(key)!;
     }
@@ -52,9 +52,9 @@ export class AnimationLoader {
 
   private async loadFrames(
     framePaths: string[],
-    config: AnimationConfig
+    config: AnimationConfig,
   ): Promise<SpriteAnimation> {
-    const loadPromises = framePaths.map(path => PIXI.Assets.load(path));
+    const loadPromises = framePaths.map((path) => PIXI.Assets.load(path));
     const loadedTextures = await Promise.all(loadPromises);
 
     return {

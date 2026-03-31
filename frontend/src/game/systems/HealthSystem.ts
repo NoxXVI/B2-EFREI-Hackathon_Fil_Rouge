@@ -5,7 +5,7 @@ const PLAYER_DAMAGE = 1;
 const INVULNERABILITY_DURATION = 1500;
 const COLLISION_RADIUS = 30;
 
-export function healthSystem(world: World, deltaMS: number, onPlayerDeath?: () => void) {
+export function healthSystem(world: World, deltaMS: number) {
   const players = world.query(["PlayerTag", "Position", "Health"]);
   const enemies = world.query(["EnemyTag", "Position"]);
 

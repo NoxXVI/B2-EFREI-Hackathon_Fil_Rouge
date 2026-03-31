@@ -13,7 +13,7 @@ export function movementSystem(world: World, deltaMS: number) {
     if (vel.vx === 0 && vel.vy === 0) continue;
 
     const length = Math.sqrt(vel.vx * vel.vx + vel.vy * vel.vy);
-    
+
     if (length > 0) {
       const nx = vel.vx / length;
       const ny = vel.vy / length;

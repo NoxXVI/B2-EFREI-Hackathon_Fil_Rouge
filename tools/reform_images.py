@@ -2,7 +2,7 @@ from pathlib import Path
 import os
 from PIL import Image, ImageChops
 
-input_dir = Path("C:/Users/HUzka/Projet/EFREI/B2/Hackathon/frontend/public/assets")
+input_dir = Path("C:/Users/HUzka/Projet/EFREI/B2/Hackathon/frontend/public/assets/projectile")
 
 def autocrop(img):
     bg = Image.new(img.mode, img.size, img.getpixel((0, 0)))
