@@ -1,13 +1,14 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Application, Sprite, Ticker } from "pixi.js";
 import { GameEngine } from "./GameEngine";
-import { Position } from "./components";
+import { Position, Health } from "./components";
 
 export const GameCanvas = () => {
   const engineRef = useRef<GameEngine | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const spritesRef = useRef<Map<number, Sprite>>(new Map());
   const appRef = useRef<Application | null>(null);
+  const [health, setHealth] = useState(3);
 
   useEffect(() => {
     const init = async () => {
@@ -37,6 +38,17 @@ export const GameCanvas = () => {
         engineRef.current.update(ticker.deltaMS);
 
         const engine = engineRef.current;
+        
+        const players = engine.world.query(["PlayerTag", "Health"]);
+        if (players.length > 0) {
+          const playerHealth = engine.world.getComponent<Health>(players[0], "Health");
+          if (playerHealth) {
+            setHealth(playerHealth.current);
+          }
+        } else {
+          setHealth(0);
+        }
+
         const entities = engine.world.query(["Position", "SpriteComponent"]);
         const activeEntityIds = new Set<number>();
 
@@ -94,5 +106,28 @@ export const GameCanvas = () => {
     };
   }, []);
 
-  return <div ref={containerRef} />;
+  return (
+    <div style={{ position: "relative" }}>
+      <div ref={containerRef} />
+      <div style={{ 
+        position: "absolute", 
+        top: 10, 
+        left: 10, 
+        display: "flex", 
+        gap: "8px" 
+      }}>
+        {[...Array(3)].map((_, i) => (
+          <span 
+            key={i} 
+            style={{ 
+              fontSize: "24px",
+              opacity: i < health ? 1 : 0.3
+            }}
+          >
+            ❤️
+          </span>
+        ))}
+      </div>
+    </div>
+  );
 };

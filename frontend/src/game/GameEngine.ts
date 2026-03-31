@@ -3,53 +3,22 @@ import { movementSystem } from "./systems/MovementSystem";
 import { enemyFollowSystem } from "./systems/EnemyFollowSystem";
 import { playerInputSystem } from "./systems/PlayerInputSystem";
 import { collisionAvoidanceSystem } from "./systems/CollisionAvoidanceSystem";
+import { healthSystem, checkDeath } from "./systems/HealthSystem";
 import { AnimationSystem } from "./systems/AnimationSystem";
-import { Position, Velocity, SpriteComponent } from "./components";
+import { Position, Velocity, SpriteComponent, Health } from "./components";
 import { SpriteManifest } from "./components/Animation";
+import spritesManifest from "../assets/sprites_manifest.json";
 
-const soldierManifest: SpriteManifest = {
-  idle: ["/assets/soldier/walk/soldier_walk_0.png"],
-  walk: [
-    "/assets/soldier/walk/soldier_walk_0.png",
-    "/assets/soldier/walk/soldier_walk_1.png",
-    "/assets/soldier/walk/soldier_walk_2.png",
-    "/assets/soldier/walk/soldier_walk_3.png",
-    "/assets/soldier/walk/soldier_walk_4.png",
-    "/assets/soldier/walk/soldier_walk_5.png",
-    "/assets/soldier/walk/soldier_walk_6.png",
-    "/assets/soldier/walk/soldier_walk_7.png",
-  ],
-  attack: [
-    "/assets/soldier/attack/soldier_attack_0.png",
-    "/assets/soldier/attack/soldier_attack_1.png",
-    "/assets/soldier/attack/soldier_attack_2.png",
-    "/assets/soldier/attack/soldier_attack_3.png",
-    "/assets/soldier/attack/soldier_attack_4.png",
-    "/assets/soldier/attack/soldier_attack_5.png",
-    "/assets/soldier/attack/soldier_attack_6.png",
-    "/assets/soldier/attack/soldier_attack_7.png",
-    "/assets/soldier/attack/soldier_attack_8.png",
-  ],
-  death: [
-    "/assets/soldier/death/soldier_death_0.png",
-    "/assets/soldier/death/soldier_death_1.png",
-    "/assets/soldier/death/soldier_death_2.png",
-    "/assets/soldier/death/soldier_death_3.png",
-  ],
-};
+const createSoldierManifest = (): SpriteManifest => ({
+  idle: spritesManifest.soldier_walk.slice(0, 1),
+  walk: spritesManifest.soldier_walk,
+  attack: spritesManifest.soldier_attack,
+  death: spritesManifest.soldier_death,
+});
 
-const orcManifest: SpriteManifest = {
-  walk: [
-    "/assets/orc/walk/orc_walk_0.png",
-    "/assets/orc/walk/orc_walk_1.png",
-    "/assets/orc/walk/orc_walk_2.png",
-    "/assets/orc/walk/orc_walk_3.png",
-    "/assets/orc/walk/orc_walk_4.png",
-    "/assets/orc/walk/orc_walk_5.png",
-    "/assets/orc/walk/orc_walk_6.png",
-    "/assets/orc/walk/orc_walk_7.png",
-  ],
-};
+const createOrcManifest = (): SpriteManifest => ({
+  walk: spritesManifest.orc_walk,
+});
 
 export class GameEngine {
   public world: World;
@@ -66,6 +35,7 @@ export class GameEngine {
     this.world.addComponent(player, "PlayerTag", {});
     this.world.addComponent<Position>(player, "Position", { x: 400, y: 300 });
     this.world.addComponent<Velocity>(player, "Velocity", { vx: 0, vy: 0, speed: 200 });
+    this.world.addComponent<Health>(player, "Health", { current: 3, max: 3 });
     this.world.addComponent<SpriteComponent>(player, "SpriteComponent", {
       width: 48,
       height: 48,
@@ -74,7 +44,7 @@ export class GameEngine {
 
     await this.animationSystem.loadAnimations(
       player,
-      soldierManifest,
+      createSoldierManifest(),
       {
         idle: { speed: 1, loop: true },
         walk: { speed: 10, loop: true },
@@ -99,7 +69,7 @@ export class GameEngine {
 
       await this.animationSystem.loadAnimations(
         enemy,
-        orcManifest,
+        createOrcManifest(),
         {
           walk: { speed: 8, loop: true },
         }
@@ -112,6 +82,8 @@ export class GameEngine {
     enemyFollowSystem(this.world);
     collisionAvoidanceSystem(this.world);
     movementSystem(this.world, deltaMS);
+    healthSystem(this.world, deltaMS);
+    checkDeath(this.world);
     this.animationSystem.update(this.world, deltaMS);
     this.updateAnimations();
   }

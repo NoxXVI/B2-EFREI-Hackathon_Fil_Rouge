@@ -15,14 +15,16 @@ export interface Health {
   max: number;
 }
 
-export interface SpriteComponent {
-  // Optionnel : référence vers le sprite PixiJS (à lier côté React/Pixi)
-  asset: string;
-  width: number;
-  height: number;
-  anchor: number; // ex: 0.5 pour centrer
+export interface Invulnerable {
+  timer: number;
+  duration: number;
 }
 
-// Les "Tags" sont des composants sans données (juste pour filtrer)
+export interface SpriteComponent {
+  width: number;
+  height: number;
+  anchor: number;
+}
+
 export interface PlayerTag {}
 export interface EnemyTag {}
