@@ -181,6 +181,15 @@ export const GameCanvas = () => {
               } else {
                 sprite.scale.x = 2;
               }
+            } else if (engine.world.hasComponent(entityId, "EnemyTag")) {
+              const vel = engine.world.getComponent<{
+                vx: number;
+                vy: number;
+              }>(entityId, "Velocity");
+              if (vel) {
+                sprite.scale.x = vel.vx < 0 ? -2 : 2;
+                sprite.scale.y = 2;
+              }
             }
           }
         }

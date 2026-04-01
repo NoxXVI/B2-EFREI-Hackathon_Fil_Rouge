@@ -22,7 +22,7 @@ window.addEventListener("mousemove", (e) => {
 });
 
 window.addEventListener("mousedown", (e) => {
-  if (e.button === 2) {
+  if (e.button === 0) {
     attackTriggered = true;
   }
 });

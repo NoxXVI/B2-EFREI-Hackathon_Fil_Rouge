@@ -29,6 +29,9 @@ const createOrcManifest = (): SpriteManifest => ({
 export class GameEngine {
   public world: World;
   public animationSystem: AnimationSystem;
+  private spawnTimer = 0;
+  private readonly spawnInterval = 2500;
+  private readonly maxEnemies = 20;
 
   constructor() {
     this.world = new World();
@@ -60,31 +63,17 @@ export class GameEngine {
     });
 
     for (let i = 0; i < 10; i++) {
-      const enemy = this.world.createEntity();
-      this.world.addComponent(enemy, "EnemyTag", {});
-      this.world.addComponent<Position>(enemy, "Position", {
-        x: Math.random() * 800,
-        y: Math.random() * 600,
-      });
-      this.world.addComponent<Velocity>(enemy, "Velocity", {
-        vx: 0,
-        vy: 0,
-        speed: 80,
-      });
-      this.world.addComponent<Health>(enemy, "Health", { current: 3, max: 3 });
-      this.world.addComponent<SpriteComponent>(enemy, "SpriteComponent", {
-        width: 48,
-        height: 48,
-        anchor: 0.5,
-      });
-
-      await this.animationSystem.loadAnimations(enemy, createOrcManifest(), {
-        walk: { speed: 8, loop: true },
-      });
+      await this.spawnOrc();
     }
   }
 
   update(deltaMS: number) {
+    this.spawnTimer += deltaMS;
+    if (this.spawnTimer >= this.spawnInterval) {
+      this.spawnTimer = 0;
+      void this.spawnOrc();
+    }
+
     playerInputSystem(this.world);
     attackSystem(this.world);
     projectileSystem(this.world);
@@ -96,6 +85,33 @@ export class GameEngine {
     cleanupDeadEntities(this.world);
     this.animationSystem.update(this.world, deltaMS);
     this.updateAnimations();
+  }
+
+  private async spawnOrc() {
+    const enemyCount = this.world.query(["EnemyTag"]).length;
+    if (enemyCount >= this.maxEnemies) return;
+
+    const enemy = this.world.createEntity();
+    this.world.addComponent(enemy, "EnemyTag", {});
+    this.world.addComponent<Position>(enemy, "Position", {
+      x: Math.random() * 800,
+      y: Math.random() * 600,
+    });
+    this.world.addComponent<Velocity>(enemy, "Velocity", {
+      vx: 0,
+      vy: 0,
+      speed: 80,
+    });
+    this.world.addComponent<Health>(enemy, "Health", { current: 3, max: 3 });
+    this.world.addComponent<SpriteComponent>(enemy, "SpriteComponent", {
+      width: 48,
+      height: 48,
+      anchor: 0.5,
+    });
+
+    await this.animationSystem.loadAnimations(enemy, createOrcManifest(), {
+      walk: { speed: 8, loop: true },
+    });
   }
 
   private updateAnimations() {
