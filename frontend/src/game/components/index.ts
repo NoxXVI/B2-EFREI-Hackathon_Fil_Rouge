@@ -29,6 +29,7 @@ export interface SpriteComponent {
 export type PlayerTag = Record<string, never>;
 export type EnemyTag = Record<string, never>;
 export type ProjectileTag = Record<string, never>;
+export type DeadTag = Record<string, never>;
 
 export type TimerComponent = {
   timeLeft: number;

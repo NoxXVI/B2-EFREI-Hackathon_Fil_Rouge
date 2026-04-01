@@ -15,8 +15,9 @@ export const GameCanvas = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const spritesRef = useRef<Map<number, Sprite>>(new Map());
   const appRef = useRef<Application | null>(null);
-  const [health, setHealth] = useState(3);
   const arrowTextureRef = useRef<Texture | null>(null);
+  const heartTextureRef = useRef<Texture | null>(null);
+  const heartSpritesRef = useRef<Sprite[]>([]);
   const [mouseX, setMouseX] = useState(400);
 
   useEffect(() => {
@@ -37,6 +38,10 @@ export const GameCanvas = () => {
       arrowTex.baseTexture.scaleMode = SCALE_MODES.NEAREST;
       arrowTextureRef.current = arrowTex;
 
+      const heartTex = await Assets.load("/assets/heart.png");
+      heartTex.baseTexture.scaleMode = SCALE_MODES.NEAREST;
+      heartTextureRef.current = heartTex;
+
       const engine = new GameEngine();
       engineRef.current = engine;
 
@@ -54,6 +59,19 @@ export const GameCanvas = () => {
       const container = new Sprite();
       app.stage.addChild(container);
 
+      const heartsContainer = new Sprite();
+      app.stage.addChild(heartsContainer);
+
+      for (let i = 0; i < 3; i++) {
+        const heartSprite = new Sprite(heartTex);
+        heartSprite.anchor.set(0.5);
+        heartSprite.x = 40 + i * 60;
+        heartSprite.y = 40;
+        heartSprite.scale.set(1);
+        heartsContainer.addChild(heartSprite);
+        heartSpritesRef.current.push(heartSprite);
+      }
+
       await new Promise((resolve) => setTimeout(resolve, 500));
 
       const ticker = Ticker.shared;
@@ -64,14 +82,28 @@ export const GameCanvas = () => {
 
         const engine = engineRef.current;
 
-        const players = engine.world.query(["PlayerTag", "Health", "Position"]);
-        if (players.length > 0) {
+        const players = engine.world.query([
+          "PlayerTag",
+          "Health",
+          "Position",
+          "DeadTag",
+        ]);
+        if (
+          players.length > 0 &&
+          !engine.world.hasComponent(players[0], "DeadTag")
+        ) {
           const playerHealth = engine.world.getComponent<Health>(
             players[0],
             "Health",
           );
           if (playerHealth) {
-            setHealth(playerHealth.current);
+            for (let i = 0; i < heartSpritesRef.current.length; i++) {
+              if (i < playerHealth.current) {
+                heartSpritesRef.current[i].tint = 0xffffff;
+              } else {
+                heartSpritesRef.current[i].tint = 0x888888;
+              }
+            }
           }
 
           const playerPos = engine.world.getComponent<Position>(
@@ -79,8 +111,6 @@ export const GameCanvas = () => {
             "Position",
           )!;
           container.position.set(400 - playerPos.x, 300 - playerPos.y);
-        } else {
-          setHealth(0);
         }
 
         const entities = engine.world.query(["Position", "SpriteComponent"]);
@@ -179,27 +209,6 @@ export const GameCanvas = () => {
   return (
     <div style={{ position: "relative" }}>
       <div ref={containerRef} />
-      <div
-        style={{
-          position: "absolute",
-          top: 10,
-          left: 10,
-          display: "flex",
-          gap: "8px",
-        }}
-      >
-        {[...Array(3)].map((_, i) => (
-          <span
-            key={i}
-            style={{
-              fontSize: "24px",
-              opacity: i < health ? 1 : 0.3,
-            }}
-          >
-            ❤️
-          </span>
-        ))}
-      </div>
     </div>
   );
 };

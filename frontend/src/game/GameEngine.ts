@@ -101,6 +101,10 @@ export class GameEngine {
   private updateAnimations() {
     const players = this.world.query(["PlayerTag", "Velocity"]);
     for (const player of players) {
+      if (this.world.hasComponent(player, "DeadTag")) {
+        this.animationSystem.setAnimation(player, "death");
+        continue;
+      }
       const vel = this.world.getComponent<Velocity>(player, "Velocity")!;
       if (getAttackTriggered()) {
         this.animationSystem.setAnimation(player, "attack");
