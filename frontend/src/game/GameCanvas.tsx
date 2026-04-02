@@ -6,6 +6,7 @@ import {
   SCALE_MODES,
   Assets,
   Texture,
+  Graphics,
 } from "pixi.js";
 import { GameEngine } from "./GameEngine";
 import { Position, Health } from "./components";
@@ -217,6 +218,32 @@ export const GameCanvas = () => {
                 sprite.height = spriteComp.height;
                 container.addChild(sprite);
                 spritesRef.current.set(entityId, sprite);
+              }
+            }
+
+            if (
+              engine.world.hasComponent(entityId, "LaserTag") &&
+              !engine.world.hasComponent(entityId, "BossTag")
+            ) {
+              const vel = engine.world.getComponent<{ vx: number; vy: number }>(
+                entityId,
+                "Velocity",
+              );
+              const stats = engine.world.getComponent<{ length: number }>(
+                entityId,
+                "LaserStats",
+              );
+              if (vel && stats) {
+                const laserGraphics = new Graphics();
+                laserGraphics.rect(0, 0, stats.length, spriteComp.width);
+                laserGraphics.fill(0xff0000);
+                laserGraphics.rotation = Math.atan2(vel.vy, vel.vx);
+                container.addChild(laserGraphics);
+                spritesRef.current.set(
+                  entityId,
+                  laserGraphics as unknown as Sprite,
+                );
+                sprite = laserGraphics as unknown as Sprite;
               }
             }
           } else {

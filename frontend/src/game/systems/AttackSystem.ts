@@ -223,5 +223,21 @@ export function projectileSystem(world: World) {
         break;
       }
     }
+
+    for (const boss of world.query(["BossTag", "Position", "Health"])) {
+      const bossPos = world.getComponent<Position>(boss, "Position")!;
+      const bossHealth = world.getComponent<Health>(boss, "Health")!;
+
+      const dx = pos.x - bossPos.x;
+      const dy = pos.y - bossPos.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist < 50) {
+        const baseDamage = projectileStats?.damage ?? PROJECTILE_DAMAGE;
+        bossHealth.current -= baseDamage;
+        world.destroyEntity(projectile);
+        break;
+      }
+    }
   }
 }

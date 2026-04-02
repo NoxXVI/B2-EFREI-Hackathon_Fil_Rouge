@@ -10,6 +10,12 @@ import {
   getAttackTriggered,
   projectileSystem,
 } from "./systems/AttackSystem";
+import {
+  bossSystem,
+  laserSystem,
+  cleanupLaserEntities,
+  spawnBoss,
+} from "./systems/BossSystem";
 import { AnimationSystem } from "./systems/AnimationSystem";
 import { Position, Velocity, SpriteComponent, Health } from "./components";
 import { SpriteManifest } from "./components/Animation";
@@ -32,6 +38,8 @@ export class GameEngine {
   private spawnTimer = 0;
   private readonly spawnInterval = 2500;
   private readonly maxEnemies = 20;
+  private bossSpawnTimer = 3000;
+  private bossSpawned = false;
 
   constructor() {
     this.world = new World();
@@ -83,14 +91,25 @@ export class GameEngine {
       void this.spawnOrc();
     }
 
+    if (!this.bossSpawned) {
+      this.bossSpawnTimer -= deltaMS;
+      if (this.bossSpawnTimer <= 0) {
+        this.bossSpawned = true;
+        spawnBoss(this.world, 1000, 300, this.animationSystem);
+      }
+    }
+
     playerInputSystem(this.world);
     attackSystem(this.world, deltaMS);
     projectileSystem(this.world);
+    bossSystem(this.world, deltaMS);
+    laserSystem(this.world);
     enemyFollowSystem(this.world);
     collisionAvoidanceSystem(this.world);
     movementSystem(this.world, deltaMS);
     healthSystem(this.world, deltaMS);
     checkDeath(this.world);
+    cleanupLaserEntities(this.world);
     this.animationSystem.update(this.world, deltaMS);
     this.updateAnimations();
   }
@@ -148,6 +167,14 @@ export class GameEngine {
       const vel = this.world.getComponent<Velocity>(enemy, "Velocity")!;
       if (vel.vx !== 0 || vel.vy !== 0) {
         this.animationSystem.setAnimation(enemy, "walk");
+      }
+    }
+
+    const bosses = this.world.query(["BossTag", "Velocity"]);
+    for (const boss of bosses) {
+      const vel = this.world.getComponent<Velocity>(boss, "Velocity")!;
+      if (vel.vx !== 0 || vel.vy !== 0) {
+        this.animationSystem.setAnimation(boss, "walk");
       }
     }
   }
