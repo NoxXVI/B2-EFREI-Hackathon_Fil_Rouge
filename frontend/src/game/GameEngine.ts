@@ -11,7 +11,13 @@ import {
   projectileSystem,
 } from "./systems/AttackSystem";
 import { AnimationSystem } from "./systems/AnimationSystem";
-import { Position, Velocity, SpriteComponent, Health } from "./components";
+import {
+  Position,
+  Velocity,
+  SpriteComponent,
+  Health,
+  PlayerProgress,
+} from "./components";
 import { SpriteManifest } from "./components/Animation";
 import spritesManifest from "../assets/sprites_manifest.json";
 
@@ -30,8 +36,15 @@ export class GameEngine {
   public world: World;
   public animationSystem: AnimationSystem;
   private spawnTimer = 0;
-  private readonly spawnInterval = 2500;
-  private readonly maxEnemies = 20;
+  private readonly initialOrcs = 14;
+  private readonly baseSpawnIntervalMS = 1000;
+  private readonly minSpawnIntervalMS = 900;
+  private readonly spawnIntervalStepPerLevelMS = 120;
+  private readonly baseMaxEnemies = 18;
+  private readonly maxEnemiesStepPerLevel = 3;
+  private readonly worldWidth = 800;
+  private readonly worldHeight = 600;
+  private readonly spawnRadius = 200;
 
   constructor() {
     this.world = new World();
@@ -68,19 +81,24 @@ export class GameEngine {
 
     ensurePlayerProgress(this.world);
 
-    for (let i = 0; i < 10; i++) {
-      await this.spawnOrc();
+    const initialLevel = this.getCurrentLevel();
+    const initialMaxEnemies = this.getMaxEnemies(initialLevel);
+    for (let i = 0; i < this.initialOrcs; i++) {
+      await this.spawnOrc(initialMaxEnemies);
     }
   }
 
   update(deltaMS: number) {
     // Safety net: keep progression components present even if init was interrupted.
     ensurePlayerProgress(this.world);
+    const level = this.getCurrentLevel();
+    const maxEnemies = this.getMaxEnemies(level);
+    const spawnIntervalMS = this.getSpawnIntervalMS(level);
 
     this.spawnTimer += deltaMS;
-    if (this.spawnTimer >= this.spawnInterval) {
-      this.spawnTimer = 0;
-      void this.spawnOrc();
+    while (this.spawnTimer >= spawnIntervalMS) {
+      this.spawnTimer -= spawnIntervalMS;
+      void this.spawnOrc(maxEnemies);
     }
 
     playerInputSystem(this.world);
@@ -95,15 +113,32 @@ export class GameEngine {
     this.updateAnimations();
   }
 
-  private async spawnOrc() {
+  private async spawnOrc(maxEnemies: number) {
     const enemyCount = this.world.query(["EnemyTag"]).length;
-    if (enemyCount >= this.maxEnemies) return;
+    if (enemyCount >= maxEnemies) return;
+
+    const player = this.world.query(["PlayerTag", "Position"])[0];
+    if (player === undefined) return;
+    const playerPos = this.world.getComponent<Position>(player, "Position");
+    if (!playerPos) return;
+
+    const angle = Math.random() * Math.PI * 2;
+    const spawnX = this.clamp(
+      playerPos.x + Math.cos(angle) * this.spawnRadius,
+      0,
+      this.worldWidth,
+    );
+    const spawnY = this.clamp(
+      playerPos.y + Math.sin(angle) * this.spawnRadius,
+      0,
+      this.worldHeight,
+    );
 
     const enemy = this.world.createEntity();
     this.world.addComponent(enemy, "EnemyTag", {});
     this.world.addComponent<Position>(enemy, "Position", {
-      x: Math.random() * 800,
-      y: Math.random() * 600,
+      x: spawnX,
+      y: spawnY,
     });
     this.world.addComponent<Velocity>(enemy, "Velocity", {
       vx: 0,
@@ -124,6 +159,35 @@ export class GameEngine {
     await this.animationSystem.loadAnimations(enemy, createOrcManifest(), {
       walk: { speed: 8, loop: true },
     });
+  }
+
+  private clamp(value: number, min: number, max: number): number {
+    return Math.max(min, Math.min(max, value));
+  }
+
+  private getCurrentLevel(): number {
+    const progressionEntity = this.world.query([
+      "ProgressionTag",
+      "PlayerProgress",
+    ])[0];
+    if (progressionEntity === undefined) return 1;
+
+    const progress = this.world.getComponent<PlayerProgress>(
+      progressionEntity,
+      "PlayerProgress",
+    );
+    return progress?.level ?? 1;
+  }
+
+  private getMaxEnemies(level: number): number {
+    return this.baseMaxEnemies + (level - 1) * this.maxEnemiesStepPerLevel;
+  }
+
+  private getSpawnIntervalMS(level: number): number {
+    return Math.max(
+      this.minSpawnIntervalMS,
+      this.baseSpawnIntervalMS - (level - 1) * this.spawnIntervalStepPerLevelMS,
+    );
   }
 
   private updateAnimations() {
