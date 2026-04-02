@@ -4,10 +4,7 @@ import { enemyFollowSystem } from "./systems/EnemyFollowSystem";
 import { playerInputSystem } from "./systems/PlayerInputSystem";
 import { collisionAvoidanceSystem } from "./systems/CollisionAvoidanceSystem";
 import { healthSystem, checkDeath } from "./systems/HealthSystem";
-import {
-  ensurePlayerProgress,
-  passiveXpSystem,
-} from "./systems/PlayerProgressSystem";
+import { ensurePlayerProgress } from "./systems/PlayerProgressSystem";
 import {
   attackSystem,
   getAttackTriggered,
@@ -79,7 +76,6 @@ export class GameEngine {
   update(deltaMS: number) {
     // Safety net: keep progression components present even if init was interrupted.
     ensurePlayerProgress(this.world);
-    passiveXpSystem(this.world, deltaMS);
 
     this.spawnTimer += deltaMS;
     if (this.spawnTimer >= this.spawnInterval) {
