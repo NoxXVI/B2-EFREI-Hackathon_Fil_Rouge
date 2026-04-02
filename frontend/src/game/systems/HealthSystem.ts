@@ -1,5 +1,6 @@
 import { World } from "../ecs/World";
 import { Position, Health, Invulnerable } from "../components";
+import { grantEnemyXp } from "./PlayerProgressSystem";
 
 const PLAYER_DAMAGE = 1;
 const INVULNERABILITY_DURATION = 1500;
@@ -8,13 +9,13 @@ const DEATH_ANIMATION_DURATION = 2000;
 
 export function healthSystem(world: World, deltaMS: number) {
   const players = world.query(["PlayerTag", "Position", "Health"]);
-  const enemies = world.query(["EnemyTag", "Position"]);
+  const enemies = world.query(["EnemyTag", "Position", "Health"]);
 
   for (const player of players) {
-    if (world.hasComponent(player, "DeadTag")) continue;
-
     const playerPos = world.getComponent<Position>(player, "Position")!;
     const health = world.getComponent<Health>(player, "Health")!;
+    if (health.isDead || world.hasComponent(player, "DeadTag")) continue;
+
     const invuln = world.getComponent<Invulnerable>(player, "Invulnerable");
 
     if (invuln && invuln.timer > 0) {
@@ -26,9 +27,10 @@ export function healthSystem(world: World, deltaMS: number) {
     }
 
     for (const enemy of enemies) {
-      if (world.hasComponent(enemy, "DeadTag")) continue;
-
       const enemyPos = world.getComponent<Position>(enemy, "Position")!;
+      const enemyHealth = world.getComponent<Health>(enemy, "Health")!;
+      if (enemyHealth.isDead || world.hasComponent(enemy, "DeadTag")) continue;
+
       const dx = playerPos.x - enemyPos.x;
       const dy = playerPos.y - enemyPos.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
@@ -49,7 +51,8 @@ export function checkDeath(world: World) {
   const players = world.query(["PlayerTag", "Health"]);
   for (const player of players) {
     const health = world.getComponent<Health>(player, "Health")!;
-    if (health.current <= 0 && !world.hasComponent(player, "DeadTag")) {
+    if (health.current <= 0 && !health.isDead) {
+      health.isDead = true;
       world.addComponent(player, "DeadTag", {});
       world.addComponent(player, "TimerComponent", {
         timeLeft: DEATH_ANIMATION_DURATION,
@@ -58,7 +61,7 @@ export function checkDeath(world: World) {
     }
   }
 
-  const deadPlayers = world.query(["DeadTag", "TimerComponent"]);
+  const deadPlayers = world.query(["PlayerTag", "DeadTag", "TimerComponent"]);
   for (const entity of deadPlayers) {
     const timer = world.getComponent<{ timeLeft: number }>(
       entity,
@@ -67,6 +70,31 @@ export function checkDeath(world: World) {
     timer.timeLeft -= 16;
     if (timer.timeLeft <= 0) {
       world.destroyEntity(entity);
+    }
+  }
+
+  const enemies = world.query(["EnemyTag", "Health"]);
+  for (const enemy of enemies) {
+    const health = world.getComponent<Health>(enemy, "Health")!;
+    if (health.current <= 0 && !health.isDead) {
+      health.isDead = true;
+      grantEnemyXp(world, 1);
+      world.addComponent(enemy, "DeadTag", {});
+      world.addComponent(enemy, "TimerComponent", {
+        timeLeft: 250,
+      });
+    }
+  }
+
+  const deadEnemies = world.query(["EnemyTag", "DeadTag", "TimerComponent"]);
+  for (const enemy of deadEnemies) {
+    const timer = world.getComponent<{ timeLeft: number }>(
+      enemy,
+      "TimerComponent",
+    )!;
+    timer.timeLeft -= 16;
+    if (timer.timeLeft <= 0) {
+      world.destroyEntity(enemy);
     }
   }
 }

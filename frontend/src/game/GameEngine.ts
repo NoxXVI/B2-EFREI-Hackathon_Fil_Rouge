@@ -5,9 +5,12 @@ import { playerInputSystem } from "./systems/PlayerInputSystem";
 import { collisionAvoidanceSystem } from "./systems/CollisionAvoidanceSystem";
 import { healthSystem, checkDeath } from "./systems/HealthSystem";
 import {
+  ensurePlayerProgress,
+  passiveXpSystem,
+} from "./systems/PlayerProgressSystem";
+import {
   attackSystem,
   getAttackTriggered,
-  cleanupDeadEntities,
   projectileSystem,
 } from "./systems/AttackSystem";
 import { AnimationSystem } from "./systems/AnimationSystem";
@@ -48,7 +51,11 @@ export class GameEngine {
       vy: 0,
       speed: 200,
     });
-    this.world.addComponent<Health>(player, "Health", { current: 3, max: 3 });
+    this.world.addComponent<Health>(player, "Health", {
+      current: 3,
+      max: 3,
+      isDead: false,
+    });
     this.world.addComponent<SpriteComponent>(player, "SpriteComponent", {
       width: 48,
       height: 48,
@@ -62,12 +69,18 @@ export class GameEngine {
       death: { speed: 8, loop: false },
     });
 
+    ensurePlayerProgress(this.world);
+
     for (let i = 0; i < 10; i++) {
       await this.spawnOrc();
     }
   }
 
   update(deltaMS: number) {
+    // Safety net: keep progression components present even if init was interrupted.
+    ensurePlayerProgress(this.world);
+    passiveXpSystem(this.world, deltaMS);
+
     this.spawnTimer += deltaMS;
     if (this.spawnTimer >= this.spawnInterval) {
       this.spawnTimer = 0;
@@ -75,14 +88,13 @@ export class GameEngine {
     }
 
     playerInputSystem(this.world);
-    attackSystem(this.world);
+    attackSystem(this.world, deltaMS);
     projectileSystem(this.world);
     enemyFollowSystem(this.world);
     collisionAvoidanceSystem(this.world);
     movementSystem(this.world, deltaMS);
     healthSystem(this.world, deltaMS);
     checkDeath(this.world);
-    cleanupDeadEntities(this.world);
     this.animationSystem.update(this.world, deltaMS);
     this.updateAnimations();
   }
@@ -102,7 +114,11 @@ export class GameEngine {
       vy: 0,
       speed: 80,
     });
-    this.world.addComponent<Health>(enemy, "Health", { current: 3, max: 3 });
+    this.world.addComponent<Health>(enemy, "Health", {
+      current: 3,
+      max: 3,
+      isDead: false,
+    });
     this.world.addComponent<SpriteComponent>(enemy, "SpriteComponent", {
       width: 48,
       height: 48,

@@ -13,6 +13,7 @@ export interface Velocity {
 export interface Health {
   current: number;
   max: number;
+  isDead: boolean;
 }
 
 export interface Invulnerable {
@@ -24,6 +25,29 @@ export interface SpriteComponent {
   width: number;
   height: number;
   anchor: number;
+}
+
+export interface PlayerProgress {
+  level: number;
+  xp: number;
+  xpToNext: number;
+  skillPoints: number;
+}
+
+export interface CombatStats {
+  fireRateMultiplier: number;
+  damageBonus: number;
+  multishot: number;
+  critChance: number;
+  critMultiplier: number;
+  homingStrength: number;
+}
+
+export interface ProjectileStats {
+  damage: number;
+  critChance: number;
+  critMultiplier: number;
+  homingStrength: number;
 }
 
 export type PlayerTag = Record<string, never>;

@@ -40,8 +40,11 @@ export class AnimationSystem {
     }
 
     this.animationData.set(entity, animMap);
+    const defaultAnimation = animMap.has("idle")
+      ? "idle"
+      : ((animMap.keys().next().value as AnimationName | undefined) ?? "walk");
     this.animations.set(entity, {
-      current: "idle",
+      current: defaultAnimation,
       timer: 0,
       frameIndex: 0,
     });

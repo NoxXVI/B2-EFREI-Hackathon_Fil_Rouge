@@ -9,6 +9,12 @@ import {
 } from "pixi.js";
 import { GameEngine } from "./GameEngine";
 import { Position, Health } from "./components";
+import {
+  applyUpgrade,
+  getUpgradeOptions,
+  type UpgradeOption,
+} from "./systems/PlayerProgressSystem";
+import { HudOverlay } from "./ui/HudOverlay";
 
 export const GameCanvas = () => {
   const engineRef = useRef<GameEngine | null>(null);
@@ -18,14 +24,35 @@ export const GameCanvas = () => {
   const arrowTextureRef = useRef<Texture | null>(null);
   const heartTextureRef = useRef<Texture | null>(null);
   const heartSpritesRef = useRef<Sprite[]>([]);
-  const [mouseX, setMouseX] = useState(400);
+  const lastFrameAtRef = useRef(0);
+  const mouseXRef = useRef(400);
+  const lastLevelRef = useRef(1);
+  const levelUpOpenRef = useRef(false);
+  const [levelUpOpen, setLevelUpOpen] = useState(false);
+  const [upgradeOptions, setUpgradeOptions] = useState<UpgradeOption[]>([]);
+  const [hudProgress, setHudProgress] = useState({
+    level: 1,
+    xp: 0,
+    xpToNext: 5,
+    skillPoints: 0,
+  });
+
+  const openUpgradeMenu = () => {
+    setUpgradeOptions(
+      getUpgradeOptions()
+        .sort(() => Math.random() - 0.5)
+        .slice(0, 3),
+    );
+    levelUpOpenRef.current = true;
+    setLevelUpOpen(true);
+  };
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       const canvas = document.getElementById("pixi-container");
       if (canvas) {
         const rect = canvas.getBoundingClientRect();
-        setMouseX(e.clientX - rect.left);
+        mouseXRef.current = e.clientX - rect.left;
       }
     };
     window.addEventListener("mousemove", handleMouseMove);
@@ -56,6 +83,7 @@ export const GameCanvas = () => {
 
       if (!containerRef.current) return;
       containerRef.current.appendChild(app.canvas);
+
       const container = new Sprite();
       app.stage.addChild(container);
 
@@ -74,20 +102,59 @@ export const GameCanvas = () => {
 
       await new Promise((resolve) => setTimeout(resolve, 500));
 
-      const ticker = Ticker.shared;
+      const ticker = app.ticker ?? Ticker.shared;
+      ticker.start();
 
       const update = () => {
         if (!engineRef.current) return;
-        engineRef.current.update(ticker.deltaMS);
-
+        lastFrameAtRef.current =
+          typeof performance !== "undefined" ? performance.now() : Date.now();
         const engine = engineRef.current;
 
-        const players = engine.world.query([
-          "PlayerTag",
-          "Health",
-          "Position",
-          "DeadTag",
-        ]);
+        if (!levelUpOpenRef.current) {
+          engine.update(ticker.deltaMS);
+        }
+
+        const progressEntity = engine.world.query([
+          "ProgressionTag",
+          "PlayerProgress",
+        ])[0];
+        if (progressEntity !== undefined) {
+          const progress = engine.world.getComponent<{
+            level: number;
+            xp: number;
+            xpToNext: number;
+            skillPoints: number;
+          }>(progressEntity, "PlayerProgress");
+
+          if (progress) {
+            setHudProgress((prev) => {
+              if (
+                prev.level === progress.level &&
+                prev.xp === progress.xp &&
+                prev.xpToNext === progress.xpToNext &&
+                prev.skillPoints === progress.skillPoints
+              ) {
+                return prev;
+              }
+              return {
+                level: progress.level,
+                xp: progress.xp,
+                xpToNext: progress.xpToNext,
+                skillPoints: progress.skillPoints,
+              };
+            });
+
+            if (progress.level > lastLevelRef.current) {
+              lastLevelRef.current = progress.level;
+              openUpgradeMenu();
+            } else if (progress.skillPoints > 0 && !levelUpOpenRef.current) {
+              openUpgradeMenu();
+            }
+          }
+        }
+
+        const players = engine.world.query(["PlayerTag", "Health", "Position"]);
         if (
           players.length > 0 &&
           !engine.world.hasComponent(players[0], "DeadTag")
@@ -176,7 +243,7 @@ export const GameCanvas = () => {
               }
             } else if (engine.world.hasComponent(entityId, "PlayerTag")) {
               const playerPos = pos;
-              if (mouseX < playerPos.x) {
+              if (mouseXRef.current < playerPos.x) {
                 sprite.scale.x = -2;
               } else {
                 sprite.scale.x = 2;
@@ -204,11 +271,36 @@ export const GameCanvas = () => {
       };
 
       ticker.add(update);
+
+      const fallbackInterval = window.setInterval(() => {
+        if (!engineRef.current) return;
+        if (levelUpOpenRef.current) return;
+
+        const now =
+          typeof performance !== "undefined" ? performance.now() : Date.now();
+        const last = lastFrameAtRef.current;
+
+        // If no frame callback came recently, force a small engine step.
+        if (last === 0 || now - last > 350) {
+          engineRef.current.update(16);
+          lastFrameAtRef.current = now;
+        }
+      }, 100);
+
+      return () => {
+        window.clearInterval(fallbackInterval);
+        ticker.remove(update);
+      };
     };
 
-    init();
+    let disposeTicker: (() => void) | undefined;
+
+    init().then((dispose) => {
+      disposeTicker = dispose;
+    });
 
     return () => {
+      disposeTicker?.();
       if (appRef.current) {
         appRef.current.destroy(true);
       }
@@ -216,8 +308,35 @@ export const GameCanvas = () => {
   }, []);
 
   return (
-    <div style={{ position: "relative" }}>
-      <div ref={containerRef} />
+    <div style={{ position: "relative", width: "800px", height: "600px" }}>
+      <div id="pixi-container" ref={containerRef} />
+      <HudOverlay
+        progress={hudProgress}
+        levelUpOpen={levelUpOpen}
+        upgradeOptions={upgradeOptions}
+        onUpgrade={(option) => {
+          if (!engineRef.current) return;
+          applyUpgrade(engineRef.current.world, option.type);
+          const progressEntity = engineRef.current.world.query([
+            "ProgressionTag",
+            "PlayerProgress",
+          ])[0];
+          const progress = progressEntity
+            ? engineRef.current.world.getComponent<{
+                level: number;
+                xp: number;
+                xpToNext: number;
+                skillPoints: number;
+              }>(progressEntity, "PlayerProgress")
+            : null;
+          if (!progress || progress.skillPoints <= 0) {
+            levelUpOpenRef.current = false;
+            setLevelUpOpen(false);
+          } else {
+            openUpgradeMenu();
+          }
+        }}
+      />
     </div>
   );
 };
