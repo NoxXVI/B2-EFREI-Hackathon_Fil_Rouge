@@ -1,3 +1,4 @@
+// GameEngine.ts — modifié pour intégrer la map tilemap
 import { World } from "./ecs/World";
 import { movementSystem } from "./systems/MovementSystem";
 import { enemyFollowSystem } from "./systems/EnemyFollowSystem";
@@ -11,9 +12,11 @@ import {
   projectileSystem,
 } from "./systems/AttackSystem";
 import { AnimationSystem } from "./systems/AnimationSystem";
+import { TilemapSystem } from "./systems/TilemapSystem"; // ← NOUVEAU
 import { Position, Velocity, SpriteComponent, Health } from "./components";
 import { SpriteManifest } from "./components/Animation";
 import spritesManifest from "../assets/sprites_manifest.json";
+import { PLAYER_SPAWN, ENEMY_SPAWNS } from "./systems/MapData"; // ← NOUVEAU
 
 const createSoldierManifest = (): SpriteManifest => ({
   idle: spritesManifest.soldier_walk.slice(0, 1),
@@ -29,20 +32,30 @@ const createOrcManifest = (): SpriteManifest => ({
 export class GameEngine {
   public world: World;
   public animationSystem: AnimationSystem;
+  public tilemapSystem: TilemapSystem; // ← NOUVEAU
   private spawnTimer = 0;
   private readonly spawnInterval = 2500;
   private readonly maxEnemies = 20;
+  private spawnIndex = 0; // ← pour tourner sur les spawn points
 
   constructor() {
     this.world = new World();
     this.animationSystem = new AnimationSystem();
+    this.tilemapSystem = new TilemapSystem(); // ← NOUVEAU
     this.initGame();
   }
 
   async initGame() {
+    // Construction de la map (async, charge le tileset)
+    await this.tilemapSystem.build(); // ← NOUVEAU
+
+    // Joueur spawn sur le point de spawn de la map
     const player = this.world.createEntity();
     this.world.addComponent(player, "PlayerTag", {});
-    this.world.addComponent<Position>(player, "Position", { x: 400, y: 300 });
+    this.world.addComponent<Position>(player, "Position", {
+      x: PLAYER_SPAWN[0], // ← utilise le spawn de la map
+      y: PLAYER_SPAWN[1],
+    });
     this.world.addComponent<Velocity>(player, "Velocity", {
       vx: 0,
       vy: 0,
@@ -68,6 +81,7 @@ export class GameEngine {
 
     ensurePlayerProgress(this.world);
 
+    // Spawn des ennemis initiaux sur les points de spawn de la map
     for (let i = 0; i < 10; i++) {
       await this.spawnOrc();
     }
@@ -89,6 +103,10 @@ export class GameEngine {
     enemyFollowSystem(this.world);
     collisionAvoidanceSystem(this.world);
     movementSystem(this.world, deltaMS);
+
+    // Résolution collisions avec les murs après le mouvement ← NOUVEAU
+    this.tilemapSystem.resolveWallCollisions(this.world);
+
     healthSystem(this.world, deltaMS);
     checkDeath(this.world);
     this.animationSystem.update(this.world, deltaMS);
@@ -99,11 +117,19 @@ export class GameEngine {
     const enemyCount = this.world.query(["EnemyTag"]).length;
     if (enemyCount >= this.maxEnemies) return;
 
+    // Utilise les spawn points de la map en rotation ← NOUVEAU
+    const spawn = ENEMY_SPAWNS[this.spawnIndex % ENEMY_SPAWNS.length];
+    this.spawnIndex++;
+
+    // Légère variation aléatoire pour éviter le stacking
+    const offsetX = (Math.random() - 0.5) * 32;
+    const offsetY = (Math.random() - 0.5) * 32;
+
     const enemy = this.world.createEntity();
     this.world.addComponent(enemy, "EnemyTag", {});
     this.world.addComponent<Position>(enemy, "Position", {
-      x: Math.random() * 800,
-      y: Math.random() * 600,
+      x: spawn[0] + offsetX,
+      y: spawn[1] + offsetY,
     });
     this.world.addComponent<Velocity>(enemy, "Velocity", {
       vx: 0,
