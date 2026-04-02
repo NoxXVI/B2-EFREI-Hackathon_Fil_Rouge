@@ -1,0 +1,39 @@
+{
+  "orc_walk": [
+    "assets/orc/walk/orc_walk_0.png",
+    "assets/orc/walk/orc_walk_1.png",
+    "assets/orc/walk/orc_walk_2.png",
+    "assets/orc/walk/orc_walk_3.png",
+    "assets/orc/walk/orc_walk_4.png",
+    "assets/orc/walk/orc_walk_5.png",
+    "assets/orc/walk/orc_walk_6.png",
+    "assets/orc/walk/orc_walk_7.png"
+  ],
+  "soldier_walk": [
+    "assets/soldier/walk/soldier_walk_0.png",
+    "assets/soldier/walk/soldier_walk_1.png",
+    "assets/soldier/walk/soldier_walk_2.png",
+    "assets/soldier/walk/soldier_walk_3.png",
+    "assets/soldier/walk/soldier_walk_4.png",
+    "assets/soldier/walk/soldier_walk_5.png",
+    "assets/soldier/walk/soldier_walk_6.png",
+    "assets/soldier/walk/soldier_walk_7.png"
+  ],
+  "soldier_attack": [
+    "assets/soldier/attack/soldier_attack_0.png",
+    "assets/soldier/attack/soldier_attack_1.png",
+    "assets/soldier/attack/soldier_attack_2.png",
+    "assets/soldier/attack/soldier_attack_3.png",
+    "assets/soldier/attack/soldier_attack_4.png",
+    "assets/soldier/attack/soldier_attack_5.png",
+    "assets/soldier/attack/soldier_attack_6.png",
+    "assets/soldier/attack/soldier_attack_7.png",
+    "assets/soldier/attack/soldier_attack_8.png"
+  ],
+  "soldier_death": [
+    "assets/soldier/death/soldier_death_0.png",
+    "assets/soldier/death/soldier_death_1.png",
+    "assets/soldier/death/soldier_death_2.png",
+    "assets/soldier/death/soldier_death_3.png"
+  ]
+}
