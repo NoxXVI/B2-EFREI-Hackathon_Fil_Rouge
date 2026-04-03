@@ -26,7 +26,7 @@ export const HudPanel = ({ progress, health }: HudPanelProps) => {
       }}
     >
       <YStack
-        padding="$1"
+        p="$1"
         style={{
           width: 300,
           backgroundColor: hudUi.panelBg,
@@ -35,13 +35,8 @@ export const HudPanel = ({ progress, health }: HudPanelProps) => {
           boxShadow: `inset 0 0 0 1px ${hudUi.panelBorderInner}`,
         }}
       >
-        <XStack
-          alignItems="flex-start"
-          gap="$2"
-          paddingHorizontal="$1"
-          paddingVertical="$1"
-        >
-          <YStack paddingHorizontal="$1" style={{ marginBottom: 4 }}>
+        <XStack items="flex-start" gap="$2" px="$1" py="$1">
+          <YStack px="$1" style={{ marginBottom: 4 }}>
             <HeartsRow current={health.current} max={health.max} />
           </YStack>
           <YStack flex={1}>

@@ -18,7 +18,7 @@ export const UpgradeModal = ({
 
   return (
     <YStack
-      padding="$4"
+      p="$4"
       style={{
         position: "absolute",
         inset: 0,
@@ -32,7 +32,7 @@ export const UpgradeModal = ({
       <YStack
         width="100%"
         gap="$3"
-        padding="$5"
+        p="$5"
         style={{
           maxWidth: 560,
           backgroundColor: hudUi.modalBg,
@@ -57,7 +57,7 @@ export const UpgradeModal = ({
           Choose a passive upgrade.
         </Text>
 
-        <YStack gap="$3" marginTop="$1">
+        <YStack gap="$3" mt="$1">
           {options.map((option) => (
             <UpgradeCardButton
               key={option.type}

@@ -1,29 +1,35 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Application,
-  Sprite,
-  Ticker,
-  SCALE_MODES,
   Assets,
-  Texture,
   Graphics,
+  SCALE_MODES,
+  Sprite,
+  Texture,
+  Ticker,
 } from "pixi.js";
 import { GameEngine } from "./GameEngine";
-import { Position, Health } from "./components";
-import {
-  applyUpgrade,
-  getUpgradeOptions,
-  type UpgradeOption,
-} from "./systems/PlayerProgressSystem";
-import { HudOverlay } from "./ui/HudOverlay";
+import { type Health, type Position } from "./components";
 import { setCameraOffset } from "./systems/AttackSystem";
 import {
   getMapMeta,
   getMapThemeForLevel,
   type MapTheme,
 } from "./systems/MapData";
+import {
+  applyUpgrade,
+  getUpgradeOptions,
+  type UpgradeOption,
+} from "./systems/PlayerProgressSystem";
 import { consumePendingLocalKills } from "./systems/ScoreSystem";
-import { MultiplayerLobby, type LobbyPlayer } from "./ui/MultiplayerLobby";
+import { HudOverlay } from "./ui/HudOverlay";
+
+type LobbyPlayer = {
+  id: string;
+  name: string;
+  color: number;
+  kills: number;
+};
 
 const MAP_THEMES: MapTheme[] = [
   "forest",
@@ -65,10 +71,9 @@ function generateRoomId(): string {
   return Math.random().toString(36).slice(2, 12);
 }
 
-function safeRoomId(value: string | null): string | null {
-  if (!value) return null;
+function safeRoomId(value: string): string {
   const cleaned = value.trim().toLowerCase();
-  if (!/^[a-z0-9_-]{3,32}$/.test(cleaned)) return null;
+  if (!/^[a-z0-9_-]{3,32}$/.test(cleaned)) return generateRoomId();
   return cleaned;
 }
 
@@ -85,19 +90,35 @@ function safeHexColor(hex: string): string {
   return cleaned.toLowerCase();
 }
 
-export const GameCanvas = () => {
+interface GameCanvasProps {
+  mode: "solo" | "multi";
+  initialPlayerName?: string;
+  initialPlayerColor?: string;
+  roomId?: string;
+  onGameOver?: () => void;
+}
+
+export const GameCanvas = ({
+  mode,
+  initialPlayerName,
+  initialPlayerColor,
+  roomId: roomIdProp,
+  onGameOver,
+}: GameCanvasProps) => {
   const engineRef = useRef<GameEngine | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const spritesRef = useRef<Map<number, Sprite>>(new Map());
   const appRef = useRef<Application | null>(null);
   const arrowTextureRef = useRef<Texture | null>(null);
-  const heartTextureRef = useRef<Texture | null>(null);
   const heartSpritesRef = useRef<Sprite[]>([]);
   const lastFrameAtRef = useRef(0);
   const laserContainerRef = useRef<Sprite | null>(null);
   const mouseXRef = useRef(400);
   const lastLevelRef = useRef(1);
   const levelUpOpenRef = useRef(false);
+  const hasSpawnedPlayerRef = useRef(false);
+  const gameOverSentRef = useRef(false);
+  const onGameOverRef = useRef(onGameOver);
   const mapChangeOpenRef = useRef(false);
   const isChangingMapRef = useRef(false);
   const isApplyingMapRef = useRef(false);
@@ -105,17 +126,7 @@ export const GameCanvas = () => {
   const mapChangeRef = useRef<MapChangeState | null>(null);
 
   // Multiplayer (WS)
-  const [roomId] = useState(() => {
-    if (typeof window === "undefined") return "default";
-    const url = new URL(window.location.href);
-    const existing = safeRoomId(url.searchParams.get("room"));
-    if (existing) return existing;
-    const next = generateRoomId();
-    url.searchParams.set("room", next);
-    window.history.replaceState(null, "", url.toString());
-    return next;
-  });
-  const lobbyOpenRef = useRef(true);
+  const roomId = safeRoomId(roomIdProp ?? "default");
   const wsRef = useRef<WebSocket | null>(null);
   const youIdRef = useRef<string | null>(null);
   const hostIdRef = useRef<string | null>(null);
@@ -124,13 +135,14 @@ export const GameCanvas = () => {
   const lastNetSendAtRef = useRef(0);
   const lastMapRequestRef = useRef<MapTheme | null>(null);
 
-  const [lobbyOpen, setLobbyOpen] = useState(true);
-  const [playerName, setPlayerName] = useState(() => {
+  const [playerName] = useState(() => {
+    if (initialPlayerName?.trim()) return initialPlayerName.trim();
     return typeof localStorage !== "undefined"
       ? (localStorage.getItem("mp_name") ?? "")
       : "";
   });
-  const [playerColor, setPlayerColor] = useState(() => {
+  const [playerColor] = useState(() => {
+    if (initialPlayerColor) return safeHexColor(initialPlayerColor);
     return typeof localStorage !== "undefined"
       ? (localStorage.getItem("mp_color") ?? "#44ccff")
       : "#44ccff";
@@ -138,8 +150,6 @@ export const GameCanvas = () => {
   const [mpPlayers, setMpPlayers] = useState<LobbyPlayer[]>([]);
   const [mpConnecting, setMpConnecting] = useState(false);
   const [mpConnected, setMpConnected] = useState(false);
-  const [mpError, setMpError] = useState<string | null>(null);
-  const [mpHostId, setMpHostId] = useState<string | null>(null);
   const [mpYouId, setMpYouId] = useState<string | null>(null);
   const [mpGameStarted, setMpGameStarted] = useState(false);
 
@@ -187,12 +197,7 @@ export const GameCanvas = () => {
     setMapChange(null);
   };
 
-  const closeLobby = () => {
-    lobbyOpenRef.current = false;
-    setLobbyOpen(false);
-  };
-
-  const resetMultiplayer = () => {
+  const resetMultiplayer = useCallback(() => {
     mpConnectedRef.current = false;
     mpGameStartedRef.current = false;
     youIdRef.current = null;
@@ -209,19 +214,18 @@ export const GameCanvas = () => {
 
     setMpConnecting(false);
     setMpConnected(false);
-    setMpHostId(null);
     setMpYouId(null);
     setMpGameStarted(false);
     setMpPlayers([]);
-  };
+  }, []);
 
-  const sendWs = (payload: unknown) => {
+  const sendWs = useCallback((payload: unknown) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify(payload));
-  };
+  }, []);
 
-  const getEngineLevel = (): number => {
+  const getEngineLevel = useCallback(() => {
     const engine = engineRef.current;
     if (!engine) return 1;
     const entity = engine.world.query(["ProgressionTag", "PlayerProgress"])[0];
@@ -232,43 +236,45 @@ export const GameCanvas = () => {
     );
     const level = progress?.level ?? 1;
     return Number.isFinite(level) && level > 0 ? Math.floor(level) : 1;
-  };
+  }, []);
 
-  const applyMapChange = async (theme: MapTheme) => {
-    const engine = engineRef.current;
-    if (!engine) return;
-    if (engine.mapTheme === theme) {
-      currentMapThemeRef.current = engine.mapTheme;
-      setCurrentMapName(engine.mapInfo.name);
-      if (mapChangeRef.current?.theme === theme) {
+  const applyMapChange = useCallback(
+    async (theme: MapTheme) => {
+      const engine = engineRef.current;
+      if (!engine) return;
+      if (engine.mapTheme === theme) {
+        currentMapThemeRef.current = engine.mapTheme;
+        setCurrentMapName(engine.mapInfo.name);
+        if (mapChangeRef.current?.theme === theme) {
+          closeMapChangeMenu();
+        }
+        isChangingMapRef.current = false;
+        setIsChangingMap(false);
+        return;
+      }
+      if (isApplyingMapRef.current) return;
+
+      isApplyingMapRef.current = true;
+      isChangingMapRef.current = true;
+      setIsChangingMap(true);
+
+      try {
+        await engine.changeMap(theme, getEngineLevel());
+        currentMapThemeRef.current = engine.mapTheme;
+        setCurrentMapName(engine.mapInfo.name);
+      } finally {
+        isApplyingMapRef.current = false;
+        isChangingMapRef.current = false;
+        setIsChangingMap(false);
         closeMapChangeMenu();
       }
-      isChangingMapRef.current = false;
-      setIsChangingMap(false);
-      return;
-    }
-    if (isApplyingMapRef.current) return;
+    },
+    [getEngineLevel],
+  );
 
-    isApplyingMapRef.current = true;
-    isChangingMapRef.current = true;
-    setIsChangingMap(true);
-
-    try {
-      await engine.changeMap(theme, getEngineLevel());
-      currentMapThemeRef.current = engine.mapTheme;
-      setCurrentMapName(engine.mapInfo.name);
-    } finally {
-      isApplyingMapRef.current = false;
-      isChangingMapRef.current = false;
-      setIsChangingMap(false);
-      closeMapChangeMenu();
-    }
-  };
-
-  const connectMultiplayer = () => {
+  const connectMultiplayer = useCallback(() => {
     if (mpConnecting || mpConnected) return;
     setMpConnecting(true);
-    setMpError(null);
 
     const name = playerName.trim() || "Player";
     const colorHex = safeHexColor(playerColor);
@@ -320,7 +326,7 @@ export const GameCanvas = () => {
       if (!msg || typeof msg.type !== "string") return;
 
       if (msg.type === "error" && typeof msg.message === "string") {
-        setMpError(msg.message);
+        console.warn("[WS] Server error:", msg.message);
         return;
       }
 
@@ -337,14 +343,9 @@ export const GameCanvas = () => {
       }
 
       hostIdRef.current = nextHostId;
-      setMpHostId((prev) => (prev === nextHostId ? prev : nextHostId));
 
       mpGameStartedRef.current = started;
       setMpGameStarted(started);
-
-      if (started && lobbyOpenRef.current) {
-        closeLobby();
-      }
 
       const incomingPlayers: LobbyPlayer[] = Array.isArray(msg.players)
         ? msg.players
@@ -431,18 +432,49 @@ export const GameCanvas = () => {
 
     ws.addEventListener("close", () => {
       resetMultiplayer();
-      setMpError("Déconnecté du serveur.");
+      console.warn("[WS] Disconnected from server.");
     });
 
     ws.addEventListener("error", () => {
       setMpConnecting(false);
-      setMpError("Impossible de se connecter au serveur WS.");
+      console.warn("[WS] Unable to connect to server.");
     });
-  };
+  }, [
+    applyMapChange,
+    mpConnected,
+    mpConnecting,
+    playerColor,
+    playerName,
+    resetMultiplayer,
+    roomId,
+    sendWs,
+  ]);
 
-  const startMultiplayer = () => {
+  useEffect(() => {
+    if (mode !== "multi") {
+      wsRef.current?.close();
+      resetMultiplayer();
+      return;
+    }
+    connectMultiplayer();
+  }, [connectMultiplayer, mode, resetMultiplayer]);
+
+  useEffect(() => {
+    if (mode !== "multi") return;
+    if (!mpConnected) return;
+    if (mpGameStarted) return;
     sendWs({ type: "startGame" });
-  };
+  }, [mode, mpConnected, mpGameStarted, sendWs]);
+
+  useEffect(() => {
+    onGameOverRef.current = onGameOver;
+  }, [onGameOver]);
+
+  useEffect(() => {
+    return () => {
+      wsRef.current?.close();
+    };
+  }, []);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -464,12 +496,15 @@ export const GameCanvas = () => {
 
       const heartTex = await Assets.load("/assets/heart.png");
       heartTex.baseTexture.scaleMode = SCALE_MODES.NEAREST;
-      heartTextureRef.current = heartTex;
 
       const engine = new GameEngine();
       engineRef.current = engine;
       currentMapThemeRef.current = engine.mapTheme;
       setCurrentMapName(engine.mapInfo.name);
+
+      const name = playerName.trim() || "Player";
+      const colorNum = hexToColor(safeHexColor(playerColor));
+      engine.setLocalPlayerAppearance(name, colorNum);
 
       const app = new Application();
       appRef.current = app;
@@ -556,7 +591,6 @@ export const GameCanvas = () => {
         if (
           !levelUpOpenRef.current &&
           !mapChangeOpenRef.current &&
-          !lobbyOpenRef.current &&
           !isApplyingMapRef.current
         ) {
           engine.update(ticker.deltaMS);
@@ -618,7 +652,6 @@ export const GameCanvas = () => {
                 openMapChangeMenu(desiredTheme, progress.level);
               }
             } else if (progress.skillPoints > 0 && !levelUpOpenRef.current) {
-              // Normal level-up flow
               if (!mapChangeOpenRef.current) openUpgradeMenu();
             } else if (leveledUp && !levelUpOpenRef.current) {
               if (!mapChangeOpenRef.current) openUpgradeMenu();
@@ -626,10 +659,17 @@ export const GameCanvas = () => {
           }
         }
 
+        const localPlayer = engine.getLocalPlayerEntity();
+        if (localPlayer !== null) {
+          hasSpawnedPlayerRef.current = true;
+        } else if (hasSpawnedPlayerRef.current && !gameOverSentRef.current) {
+          gameOverSentRef.current = true;
+          onGameOverRef.current?.();
+        }
+
         let camX = 0;
         let camY = 0;
 
-        const localPlayer = engine.getLocalPlayerEntity();
         if (
           localPlayer !== null &&
           !engine.world.hasComponent(localPlayer, "DeadTag")
@@ -640,11 +680,8 @@ export const GameCanvas = () => {
           );
           if (playerHealth) {
             for (let i = 0; i < heartSpritesRef.current.length; i++) {
-              if (i < playerHealth.current) {
-                heartSpritesRef.current[i].tint = 0xffffff;
-              } else {
-                heartSpritesRef.current[i].tint = 0x888888;
-              }
+              heartSpritesRef.current[i].tint =
+                i < playerHealth.current ? 0xffffff : 0x888888;
             }
           }
 
@@ -875,7 +912,6 @@ export const GameCanvas = () => {
         if (levelUpOpenRef.current) return;
         if (mapChangeOpenRef.current) return;
         if (isChangingMapRef.current) return;
-        if (lobbyOpenRef.current) return;
 
         const now =
           typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -907,7 +943,7 @@ export const GameCanvas = () => {
         appRef.current.destroy(true);
       }
     };
-  }, []);
+  }, [playerColor, playerName, sendWs]);
 
   return (
     <div style={{ position: "relative", width: "100%", height: "100%" }}>
@@ -915,46 +951,6 @@ export const GameCanvas = () => {
         id="pixi-container"
         ref={containerRef}
         style={{ width: "100%", height: "100%" }}
-      />
-      <MultiplayerLobby
-        open={lobbyOpen}
-        roomId={roomId}
-        inviteLink={typeof window !== "undefined" ? window.location.href : "—"}
-        connecting={mpConnecting}
-        connected={mpConnected}
-        error={mpError}
-        playerName={playerName}
-        playerColor={safeHexColor(playerColor)}
-        players={mpPlayers}
-        youId={mpYouId}
-        hostId={mpHostId}
-        gameStarted={mpGameStarted}
-        onPlayerNameChange={(name) => {
-          setPlayerName(name);
-        }}
-        onPlayerColorChange={(hex) => {
-          const safe = safeHexColor(hex);
-          setPlayerColor(safe);
-
-          const name = playerName.trim() || "Player";
-          const colorNum = hexToColor(safe);
-          engineRef.current?.setLocalPlayerAppearance(name, colorNum);
-
-          if (typeof localStorage !== "undefined") {
-            localStorage.setItem("mp_color", safe);
-          }
-
-          if (mpConnectedRef.current && !mpGameStartedRef.current) {
-            sendWs({ type: "updateColor", color: colorNum });
-          }
-        }}
-        onJoin={connectMultiplayer}
-        onStart={startMultiplayer}
-        onPlaySolo={() => {
-          wsRef.current?.close();
-          resetMultiplayer();
-          closeLobby();
-        }}
       />
       <HudOverlay
         progress={hudProgress}

@@ -13,7 +13,7 @@ export const GameOverScreen = ({
   return (
     <YStack
       width="100%"
-      padding="$5"
+      p="$5"
       gap="$4"
       style={{
         maxWidth: 860,
@@ -49,8 +49,8 @@ export const GameOverScreen = ({
         <Button
           unstyled
           onPress={onReplay}
-          paddingHorizontal="$6"
-          paddingVertical="$3"
+          px="$6"
+          py="$3"
           style={{
             borderWidth: 2,
             borderColor: screenUi.buttonBorder,
@@ -72,8 +72,8 @@ export const GameOverScreen = ({
         <Button
           unstyled
           onPress={onBackHome}
-          paddingHorizontal="$6"
-          paddingVertical="$3"
+          px="$6"
+          py="$3"
           style={{
             borderWidth: 2,
             borderColor: screenUi.buttonBorder,

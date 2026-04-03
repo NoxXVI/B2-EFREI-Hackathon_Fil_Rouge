@@ -8,7 +8,7 @@ interface XpBarProps {
 export const XpBar = ({ percent }: XpBarProps) => {
   return (
     <XStack
-      marginTop="$2"
+      mt="$2"
       style={{
         width: "100%",
         height: 14,
