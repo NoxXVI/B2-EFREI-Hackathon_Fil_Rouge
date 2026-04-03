@@ -4,12 +4,37 @@ import { screenUi } from "./screenStyles";
 
 interface HomeScreenProps {
   onPlaySolo: () => void;
-  onPlayMulti: (config: { playerName: string; playerColor: string }) => void;
+  onPlayMulti: (config: {
+    playerName: string;
+    playerColor: string;
+    roomId: string;
+  }) => void;
 }
 
 const normalizeHexColor = (value: string): string => {
   if (/^#[0-9a-fA-F]{6}$/.test(value)) return value.toLowerCase();
   return "#44ccff";
+};
+
+const generateRoomId = (): string => {
+  const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
+  if (typeof crypto !== "undefined" && "getRandomValues" in crypto) {
+    const bytes = new Uint8Array(10);
+    crypto.getRandomValues(bytes);
+    let out = "";
+    for (const b of bytes) out += alphabet[b % alphabet.length];
+    return out;
+  }
+  return Math.random().toString(36).slice(2, 12);
+};
+
+const normalizeRoomId = (value: string): string => {
+  const cleaned = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, "");
+  if (cleaned.length < 3) return generateRoomId();
+  return cleaned.slice(0, 32);
 };
 
 export const HomeScreen = ({ onPlaySolo, onPlayMulti }: HomeScreenProps) => {
@@ -18,6 +43,44 @@ export const HomeScreen = ({ onPlaySolo, onPlayMulti }: HomeScreenProps) => {
   const [helpModalOpen, setHelpModalOpen] = useState(false);
   const [playerName, setPlayerName] = useState("Player");
   const [playerColor, setPlayerColor] = useState("#44ccff");
+  const [roomId, setRoomId] = useState(() => generateRoomId());
+
+  const inviteLink =
+    typeof window === "undefined"
+      ? ""
+      : `${window.location.origin}${window.location.pathname}?room=${roomId}`;
+
+  const copyInviteLink = async () => {
+    if (!inviteLink) return;
+    try {
+      await navigator.clipboard.writeText(inviteLink);
+      return;
+    } catch {
+      // ignore and fallback below
+    }
+
+    try {
+      const textarea = document.createElement("textarea");
+      textarea.value = inviteLink;
+      textarea.setAttribute("readonly", "true");
+      textarea.style.position = "fixed";
+      textarea.style.left = "-9999px";
+      textarea.style.top = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+    } catch {
+      // ignore
+    }
+  };
+
+  const inputFrameStyle = {
+    backgroundColor: screenUi.boardBg,
+    borderWidth: 2,
+    borderColor: screenUi.panelBorder,
+    boxShadow: `inset 0 0 0 1px ${screenUi.panelBorderInner}`,
+  } as const;
 
   return (
     <YStack
@@ -282,15 +345,69 @@ export const HomeScreen = ({ onPlaySolo, onPlayMulti }: HomeScreenProps) => {
                 onChangeText={setPlayerName}
                 size="$4"
                 style={{
-                  backgroundColor: screenUi.boardBg,
+                  ...inputFrameStyle,
                   color: screenUi.text,
-                  borderWidth: 2,
-                  borderColor: screenUi.panelBorder,
-                  boxShadow: `inset 0 0 0 1px ${screenUi.panelBorderInner}`,
                   fontFamily: "var(--font-ui-body)",
                   fontSize: 28,
                 }}
               />
+            </YStack>
+
+            <YStack gap="$2">
+              <Text
+                color={screenUi.text}
+                fontSize={28}
+                style={{ fontFamily: "var(--font-ui-body)" }}
+              >
+                Room
+              </Text>
+              <Input
+                value={roomId}
+                onChangeText={(value) => setRoomId(normalizeRoomId(value))}
+                size="$4"
+                style={{
+                  ...inputFrameStyle,
+                  color: screenUi.text,
+                  fontFamily: "var(--font-ui-body)",
+                  fontSize: 28,
+                }}
+              />
+              <XStack alignItems="center" gap="$2">
+                <Input
+                  value={inviteLink}
+                  readOnly
+                  size="$3"
+                  style={{
+                    ...inputFrameStyle,
+                    flex: 1,
+                    color: screenUi.textMuted,
+                    fontFamily: "monospace",
+                    fontSize: 16,
+                  }}
+                />
+                <Button
+                  unstyled
+                  onPress={copyInviteLink}
+                  px="$3"
+                  py="$2"
+                  style={{
+                    borderWidth: 2,
+                    borderColor: screenUi.buttonBorder,
+                    backgroundColor: screenUi.buttonSecondaryBg,
+                    boxShadow: `inset 0 0 0 1px ${screenUi.panelBorderInner}`,
+                  }}
+                  hoverStyle={{ background: screenUi.buttonSecondaryHover }}
+                  pressStyle={{ background: screenUi.buttonSecondaryPress }}
+                >
+                  <Text
+                    color={screenUi.text}
+                    fontSize={24}
+                    style={{ fontFamily: "var(--font-ui-body)" }}
+                  >
+                    Copier
+                  </Text>
+                </Button>
+              </XStack>
             </YStack>
 
             <YStack gap="$2">
@@ -309,8 +426,12 @@ export const HomeScreen = ({ onPlaySolo, onPlayMulti }: HomeScreenProps) => {
                   style={{
                     width: 58,
                     height: 46,
+                    borderRadius: 8,
+                    padding: 2,
                     border: `2px solid ${screenUi.panelBorder}`,
+                    boxShadow: `inset 0 0 0 1px ${screenUi.panelBorderInner}`,
                     background: screenUi.boardBg,
+                    cursor: "pointer",
                   }}
                 />
                 <Text
@@ -334,6 +455,7 @@ export const HomeScreen = ({ onPlaySolo, onPlayMulti }: HomeScreenProps) => {
                   onPlayMulti({
                     playerName: playerName.trim() || "Player",
                     playerColor: normalizeHexColor(playerColor),
+                    roomId: normalizeRoomId(roomId),
                   })
                 }
                 px="$5"

@@ -23,7 +23,6 @@ import {
   type MapId,
 } from "./systems/MapData";
 import { consumePendingLocalKills } from "./systems/ScoreSystem";
-import { MultiplayerLobby, type LobbyPlayer } from "./ui/MultiplayerLobby";
 
 const MAP_IDS: MapId[] = [
   "forest_1",
@@ -49,10 +48,9 @@ function generateRoomId(): string {
   return Math.random().toString(36).slice(2, 12);
 }
 
-function safeRoomId(value: string | null): string | null {
-  if (!value) return null;
+function safeRoomId(value: string): string {
   const cleaned = value.trim().toLowerCase();
-  if (!/^[a-z0-9_-]{3,32}$/.test(cleaned)) return null;
+  if (!/^[a-z0-9_-]{3,32}$/.test(cleaned)) return generateRoomId();
   return cleaned;
 }
 
@@ -73,6 +71,7 @@ interface GameCanvasProps {
   mode: "solo" | "multi";
   initialPlayerName?: string;
   initialPlayerColor?: string;
+  roomId?: string;
   onGameOver?: () => void;
 }
 
@@ -80,6 +79,7 @@ export const GameCanvas = ({
   mode,
   initialPlayerName,
   initialPlayerColor,
+  roomId: roomIdProp,
   onGameOver,
 }: GameCanvasProps) => {
   const engineRef = useRef<GameEngine | null>(null);
@@ -100,17 +100,7 @@ export const GameCanvas = ({
   const isApplyingMapRef = useRef(false);
 
   // Multiplayer (WS)
-  const [roomId] = useState(() => {
-    if (typeof window === "undefined") return "default";
-    const url = new URL(window.location.href);
-    const existing = safeRoomId(url.searchParams.get("room"));
-    if (existing) return existing;
-    const next = generateRoomId();
-    url.searchParams.set("room", next);
-    window.history.replaceState(null, "", url.toString());
-    return next;
-  });
-  const lobbyOpenRef = useRef(true);
+  const roomId = safeRoomId(roomIdProp ?? "default");
   const wsRef = useRef<WebSocket | null>(null);
   const youIdRef = useRef<string | null>(null);
   const mpConnectedRef = useRef(false);
@@ -119,25 +109,20 @@ export const GameCanvas = ({
   const lastMapRequestRef = useRef<MapId | null>(null);
   const pendingMapIdRef = useRef<MapId | null>(null);
 
-  const [lobbyOpen, setLobbyOpen] = useState(mode === "multi");
-  const [playerName, setPlayerName] = useState(() => {
+  const [playerName] = useState(() => {
     if (initialPlayerName?.trim()) return initialPlayerName.trim();
     return typeof localStorage !== "undefined"
       ? (localStorage.getItem("mp_name") ?? "")
       : "";
   });
-  const [playerColor, setPlayerColor] = useState(() => {
+  const [playerColor] = useState(() => {
     if (initialPlayerColor) return safeHexColor(initialPlayerColor);
     return typeof localStorage !== "undefined"
       ? (localStorage.getItem("mp_color") ?? "#44ccff")
       : "#44ccff";
   });
-  const [mpPlayers, setMpPlayers] = useState<LobbyPlayer[]>([]);
   const [mpConnecting, setMpConnecting] = useState(false);
   const [mpConnected, setMpConnected] = useState(false);
-  const [mpError, setMpError] = useState<string | null>(null);
-  const [mpHostId, setMpHostId] = useState<string | null>(null);
-  const [mpYouId, setMpYouId] = useState<string | null>(null);
   const [mpGameStarted, setMpGameStarted] = useState(false);
 
   const [levelUpOpen, setLevelUpOpen] = useState(false);
@@ -180,11 +165,6 @@ export const GameCanvas = ({
     setPendingMapId(null);
   };
 
-  const closeLobby = () => {
-    lobbyOpenRef.current = false;
-    setLobbyOpen(false);
-  };
-
   const resetMultiplayer = () => {
     mpConnectedRef.current = false;
     mpGameStartedRef.current = false;
@@ -195,10 +175,7 @@ export const GameCanvas = ({
 
     setMpConnecting(false);
     setMpConnected(false);
-    setMpHostId(null);
-    setMpYouId(null);
     setMpGameStarted(false);
-    setMpPlayers([]);
   };
 
   const sendWs = (payload: unknown) => {
@@ -232,7 +209,6 @@ export const GameCanvas = ({
   const connectMultiplayer = useCallback(() => {
     if (mpConnecting || mpConnected) return;
     setMpConnecting(true);
-    setMpError(null);
 
     const name = playerName.trim() || "Player";
     const colorHex = safeHexColor(playerColor);
@@ -284,14 +260,13 @@ export const GameCanvas = ({
       if (!msg || typeof msg.type !== "string") return;
 
       if (msg.type === "error" && typeof msg.message === "string") {
-        setMpError(msg.message);
+        console.warn("[WS] Server error:", msg.message);
         return;
       }
 
       if (msg.type !== "state") return;
 
       const nextYouId = typeof msg.youId === "string" ? msg.youId : null;
-      const nextHostId = typeof msg.hostId === "string" ? msg.hostId : null;
       const started = !!msg.gameStarted;
 
       if (nextYouId) {
@@ -300,56 +275,8 @@ export const GameCanvas = ({
         engineRef.current?.setLocalNetworkId(nextYouId);
       }
 
-      setMpHostId((prev) => (prev === nextHostId ? prev : nextHostId));
-
       mpGameStartedRef.current = started;
       setMpGameStarted(started);
-
-      if (started && lobbyOpenRef.current) {
-        closeLobby();
-      }
-
-      const incomingPlayers: LobbyPlayer[] = Array.isArray(msg.players)
-        ? msg.players
-            .filter(
-              (p: unknown) =>
-                !!p &&
-                typeof (p as { id?: unknown }).id === "string" &&
-                typeof (p as { name?: unknown }).name === "string" &&
-                typeof (p as { color?: unknown }).color === "number",
-            )
-            .map(
-              (p: {
-                id: string;
-                name: string;
-                color: number;
-                kills?: unknown;
-              }) => ({
-                id: p.id,
-                name: p.name,
-                color: p.color,
-                kills: typeof p.kills === "number" ? p.kills : 0,
-              }),
-            )
-        : [];
-
-      incomingPlayers.sort((a, b) => a.id.localeCompare(b.id));
-      setMpPlayers((prev) => {
-        if (prev.length !== incomingPlayers.length) return incomingPlayers;
-        for (let i = 0; i < prev.length; i++) {
-          const a = prev[i];
-          const b = incomingPlayers[i];
-          if (
-            a.id !== b.id ||
-            a.name !== b.name ||
-            a.color !== b.color ||
-            a.kills !== b.kills
-          ) {
-            return incomingPlayers;
-          }
-        }
-        return prev;
-      });
 
       const mapId = isMapId(msg.mapId) ? msg.mapId : null;
       const pendingMapId = isMapId(msg.pendingMapId) ? msg.pendingMapId : null;
@@ -394,12 +321,12 @@ export const GameCanvas = ({
 
     ws.addEventListener("close", () => {
       resetMultiplayer();
-      setMpError("Déconnecté du serveur.");
+      console.warn("[WS] Disconnected from server.");
     });
 
     ws.addEventListener("error", () => {
       setMpConnecting(false);
-      setMpError("Impossible de se connecter au serveur WS.");
+      console.warn("[WS] Unable to connect to server.");
     });
   }, [
     applyMapChange,
@@ -410,18 +337,27 @@ export const GameCanvas = ({
     roomId,
   ]);
 
-  const startMultiplayer = () => {
+  const startMultiplayer = useCallback(() => {
     sendWs({ type: "startGame" });
-  };
+  }, []);
 
   useEffect(() => {
     const isMulti = mode === "multi";
-    lobbyOpenRef.current = isMulti;
-    setLobbyOpen(isMulti);
     if (isMulti) {
       connectMultiplayer();
     }
+    if (!isMulti) {
+      wsRef.current?.close();
+      resetMultiplayer();
+    }
   }, [connectMultiplayer, mode]);
+
+  useEffect(() => {
+    if (mode !== "multi") return;
+    if (!mpConnected) return;
+    if (mpGameStarted) return;
+    startMultiplayer();
+  }, [mode, mpConnected, mpGameStarted, startMultiplayer]);
 
   useEffect(() => {
     onGameOverRef.current = onGameOver;
@@ -486,11 +422,7 @@ export const GameCanvas = ({
           typeof performance !== "undefined" ? performance.now() : Date.now();
         const engine = engineRef.current;
 
-        if (
-          !levelUpOpenRef.current &&
-          !mapChangeOpenRef.current &&
-          !lobbyOpenRef.current
-        ) {
+        if (!levelUpOpenRef.current && !mapChangeOpenRef.current) {
           engine.update(ticker.deltaMS);
         }
 
@@ -812,7 +744,6 @@ export const GameCanvas = ({
         if (levelUpOpenRef.current) return;
         if (mapChangeOpenRef.current) return;
         if (isChangingMapRef.current) return;
-        if (lobbyOpenRef.current) return;
 
         const now =
           typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -848,46 +779,6 @@ export const GameCanvas = ({
   return (
     <div style={{ position: "relative", width: "800px", height: "600px" }}>
       <div id="pixi-container" ref={containerRef} />
-      <MultiplayerLobby
-        open={mode === "multi" && lobbyOpen}
-        roomId={roomId}
-        inviteLink={typeof window !== "undefined" ? window.location.href : "—"}
-        connecting={mpConnecting}
-        connected={mpConnected}
-        error={mpError}
-        playerName={playerName}
-        playerColor={safeHexColor(playerColor)}
-        players={mpPlayers}
-        youId={mpYouId}
-        hostId={mpHostId}
-        gameStarted={mpGameStarted}
-        onPlayerNameChange={(name) => {
-          setPlayerName(name);
-        }}
-        onPlayerColorChange={(hex) => {
-          const safe = safeHexColor(hex);
-          setPlayerColor(safe);
-
-          const name = playerName.trim() || "Player";
-          const colorNum = hexToColor(safe);
-          engineRef.current?.setLocalPlayerAppearance(name, colorNum);
-
-          if (typeof localStorage !== "undefined") {
-            localStorage.setItem("mp_color", safe);
-          }
-
-          if (mpConnectedRef.current && !mpGameStartedRef.current) {
-            sendWs({ type: "updateColor", color: colorNum });
-          }
-        }}
-        onJoin={connectMultiplayer}
-        onStart={startMultiplayer}
-        onPlaySolo={() => {
-          wsRef.current?.close();
-          resetMultiplayer();
-          closeLobby();
-        }}
-      />
       <HudOverlay
         progress={hudProgress}
         health={hudHealth}

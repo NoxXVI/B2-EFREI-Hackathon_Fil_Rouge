@@ -14,6 +14,7 @@ export default function App() {
   const [gameMode, setGameMode] = useState<GameMode>("solo");
   const [playerName, setPlayerName] = useState("Player");
   const [playerColor, setPlayerColor] = useState("#44ccff");
+  const [roomId, setRoomId] = useState("default");
 
   const startSoloGame = () => {
     setGameMode("solo");
@@ -22,10 +23,11 @@ export default function App() {
   };
 
   const startMultiGame = useCallback(
-    (config: { playerName: string; playerColor: string }) => {
+    (config: { playerName: string; playerColor: string; roomId: string }) => {
       setGameMode("multi");
       setPlayerName(config.playerName);
       setPlayerColor(config.playerColor);
+      setRoomId(config.roomId);
       setSessionId((prev) => prev + 1);
       setScreen("playing");
     },
@@ -61,6 +63,7 @@ export default function App() {
             mode={gameMode}
             initialPlayerName={playerName}
             initialPlayerColor={playerColor}
+            roomId={roomId}
             onGameOver={showGameOver}
           />
         )}
@@ -68,7 +71,7 @@ export default function App() {
           <GameOverScreen
             onReplay={() => {
               if (gameMode === "multi") {
-                startMultiGame({ playerName, playerColor });
+                startMultiGame({ playerName, playerColor, roomId });
                 return;
               }
               startSoloGame();
