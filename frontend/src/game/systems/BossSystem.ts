@@ -3,6 +3,7 @@ import {
   Position,
   Velocity,
   Health,
+  Invulnerable,
   LaserStats,
   FollowTarget,
   TimerComponent,
@@ -22,6 +23,7 @@ const LASER_DAMAGE = 1;
 const LASER_COOLDOWN = 2000;
 const LASER_DURATION = 3000;
 const LASER_LENGTH = 2000;
+const PLAYER_INVULNERABILITY_DURATION = 1500;
 
 let lastAttackTime = 0;
 let lastDamageTime = 0;
@@ -31,14 +33,23 @@ export function bossSystem(world: World, deltaMS: number) {
   const bosses = world.query(["BossTag", "Position", "Health"]);
 
   for (const boss of bosses) {
-    if (world.hasComponent(boss, "DeadTag")) continue;
+    const health = world.getComponent<Health>(boss, "Health");
+    if (world.hasComponent(boss, "DeadTag") || !health || health.current <= 0) {
+      continue;
+    }
 
     const bossPos = world.getComponent<Position>(boss, "Position")!;
 
-    const players = world.query(["PlayerTag", "Position"]);
-    if (players.length === 0) continue;
+    const players = world.query(["PlayerTag", "Position", "Health"]);
+    const player = players.find((entity) => {
+      const health = world.getComponent<Health>(entity, "Health");
+      return (
+        !!health && !health.isDead && !world.hasComponent(entity, "DeadTag")
+      );
+    });
+    if (player === undefined) continue;
 
-    const playerPos = world.getComponent<Position>(players[0], "Position")!;
+    const playerPos = world.getComponent<Position>(player, "Position")!;
     const dx = playerPos.x - bossPos.x;
     const dy = playerPos.y - bossPos.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
@@ -51,6 +62,17 @@ export function bossSystem(world: World, deltaMS: number) {
 
     const now = Date.now();
     if (now - lastAttackTime >= LASER_COOLDOWN) {
+      const existingLasers = world.query(["LaserTag", "FollowTarget"]);
+      for (const existingLaser of existingLasers) {
+        const follow = world.getComponent<FollowTarget>(
+          existingLaser,
+          "FollowTarget",
+        );
+        if (follow?.entity === boss) {
+          world.destroyEntity(existingLaser);
+        }
+      }
+
       for (let i = 0; i < 3; i++) {
         const angle = now / 1000 + (i * (Math.PI * 2)) / 3;
         const lx = Math.cos(angle);
@@ -79,7 +101,7 @@ export function bossSystem(world: World, deltaMS: number) {
   }
 }
 
-export function laserSystem(world: World) {
+export function laserSystem(world: World, deltaMS: number) {
   const lasers = world.query([
     "LaserTag",
     "Position",
@@ -87,11 +109,15 @@ export function laserSystem(world: World) {
     "LaserStats",
     "TimerComponent",
   ]);
-  const players = world.query(["PlayerTag", "Position"]);
-
-  if (players.length === 0) return;
-
-  const playerPos = world.getComponent<Position>(players[0], "Position")!;
+  const players = world.query(["PlayerTag", "Position", "Health"]);
+  const player = players.find((entity) => {
+    const health = world.getComponent<Health>(entity, "Health");
+    return !!health && !health.isDead && !world.hasComponent(entity, "DeadTag");
+  });
+  const playerPos =
+    player !== undefined
+      ? world.getComponent<Position>(player, "Position")
+      : undefined;
   const playerRadius = 24;
 
   for (const laser of lasers) {
@@ -108,13 +134,18 @@ export function laserSystem(world: World) {
     const laserStats = world.getComponent<LaserStats>(laser, "LaserStats")!;
     const timer = world.getComponent<TimerComponent>(laser, "TimerComponent")!;
 
-    timer.timeLeft -= 16;
+    timer.timeLeft -= deltaMS;
     if (timer.timeLeft <= 0) {
       world.destroyEntity(laser);
       continue;
     }
 
     if (!world.entities.has(followTarget.entity)) {
+      world.destroyEntity(laser);
+      continue;
+    }
+
+    if (world.hasComponent(followTarget.entity, "DeadTag")) {
       world.destroyEntity(laser);
       continue;
     }
@@ -130,6 +161,10 @@ export function laserSystem(world: World) {
 
     const vx = laserVel.vx;
     const vy = laserVel.vy;
+
+    if (player === undefined || !playerPos) {
+      continue;
+    }
 
     const dx = playerPos.x - laserPos.x;
     const dy = playerPos.y - laserPos.y;
@@ -147,9 +182,25 @@ export function laserSystem(world: World) {
 
     const now = Date.now();
     if (dist < playerRadius && now - lastDamageTime >= DAMAGE_COOLDOWN) {
-      const playerHealth = world.getComponent<Health>(players[0], "Health");
-      if (playerHealth) {
+      const playerHealth = world.getComponent<Health>(player, "Health");
+      const playerInvulnerable = world.getComponent<Invulnerable>(
+        player,
+        "Invulnerable",
+      );
+      const isInvulnerable =
+        !!playerInvulnerable && playerInvulnerable.timer > 0;
+
+      if (
+        playerHealth &&
+        !playerHealth.isDead &&
+        !world.hasComponent(player, "DeadTag") &&
+        !isInvulnerable
+      ) {
         playerHealth.current -= laserStats.damage;
+        world.addComponent(player, "Invulnerable", {
+          timer: PLAYER_INVULNERABILITY_DURATION,
+          duration: PLAYER_INVULNERABILITY_DURATION,
+        });
         lastDamageTime = now;
       }
     }
