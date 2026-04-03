@@ -69,19 +69,24 @@ function safeHexColor(hex: string): string {
   return cleaned.toLowerCase();
 }
 
-export const GameCanvas = () => {
+interface GameCanvasProps {
+  onGameOver?: () => void;
+}
+
+export const GameCanvas = ({ onGameOver }: GameCanvasProps) => {
   const engineRef = useRef<GameEngine | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const spritesRef = useRef<Map<number, Sprite>>(new Map());
   const appRef = useRef<Application | null>(null);
   const arrowTextureRef = useRef<Texture | null>(null);
-  const heartTextureRef = useRef<Texture | null>(null);
-  const heartSpritesRef = useRef<Sprite[]>([]);
   const lastFrameAtRef = useRef(0);
   const laserContainerRef = useRef<Sprite | null>(null);
   const mouseXRef = useRef(400);
   const lastLevelRef = useRef(1);
   const levelUpOpenRef = useRef(false);
+  const hasSpawnedPlayerRef = useRef(false);
+  const gameOverSentRef = useRef(false);
+  const onGameOverRef = useRef(onGameOver);
   const mapChangeOpenRef = useRef(false);
   const isChangingMapRef = useRef(false);
   const isApplyingMapRef = useRef(false);
@@ -132,6 +137,10 @@ export const GameCanvas = () => {
     xp: 0,
     xpToNext: 5,
     skillPoints: 0,
+  });
+  const [hudHealth, setHudHealth] = useState({
+    current: 3,
+    max: 3,
   });
   const [currentMapName, setCurrentMapName] = useState("—");
   const [mapChangeOpen, setMapChangeOpen] = useState(false);
@@ -391,6 +400,10 @@ export const GameCanvas = () => {
   };
 
   useEffect(() => {
+    onGameOverRef.current = onGameOver;
+  }, [onGameOver]);
+
+  useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       const canvas = document.getElementById("pixi-container");
       if (canvas) {
@@ -407,10 +420,6 @@ export const GameCanvas = () => {
       const arrowTex = await Assets.load("/assets/projectile/arrow.png");
       arrowTex.baseTexture.scaleMode = SCALE_MODES.NEAREST;
       arrowTextureRef.current = arrowTex;
-
-      const heartTex = await Assets.load("/assets/heart.png");
-      heartTex.baseTexture.scaleMode = SCALE_MODES.NEAREST;
-      heartTextureRef.current = heartTex;
 
       const engine = new GameEngine();
       engineRef.current = engine;
@@ -443,19 +452,6 @@ export const GameCanvas = () => {
 
       const bossContainer = new Sprite();
       worldContainer.addChild(bossContainer);
-
-      const heartsContainer = new Sprite();
-      app.stage.addChild(heartsContainer);
-
-      for (let i = 0; i < 3; i++) {
-        const heartSprite = new Sprite(heartTex);
-        heartSprite.anchor.set(0.5);
-        heartSprite.x = 40 + i * 60;
-        heartSprite.y = 40;
-        heartSprite.scale.set(1);
-        heartsContainer.addChild(heartSprite);
-        heartSpritesRef.current.push(heartSprite);
-      }
 
       await new Promise((resolve) => setTimeout(resolve, 500));
 
@@ -538,6 +534,13 @@ export const GameCanvas = () => {
         let camY = 0;
 
         const players = engine.world.query(["PlayerTag", "Health", "Position"]);
+        if (players.length > 0) {
+          hasSpawnedPlayerRef.current = true;
+        } else if (hasSpawnedPlayerRef.current && !gameOverSentRef.current) {
+          gameOverSentRef.current = true;
+          onGameOverRef.current?.();
+        }
+
         if (
           players.length > 0 &&
           !engine.world.hasComponent(players[0], "DeadTag")
@@ -547,13 +550,19 @@ export const GameCanvas = () => {
             "Health",
           );
           if (playerHealth) {
-            for (let i = 0; i < heartSpritesRef.current.length; i++) {
-              if (i < playerHealth.current) {
-                heartSpritesRef.current[i].tint = 0xffffff;
-              } else {
-                heartSpritesRef.current[i].tint = 0x888888;
+            setHudHealth((prev) => {
+              if (
+                prev.current === playerHealth.current &&
+                prev.max === playerHealth.max
+              ) {
+                return prev;
               }
-            }
+
+              return {
+                current: playerHealth.current,
+                max: playerHealth.max,
+              };
+            });
           }
 
           const playerPos = engine.world.getComponent<Position>(
@@ -859,6 +868,7 @@ export const GameCanvas = () => {
       />
       <HudOverlay
         progress={hudProgress}
+        health={hudHealth}
         currentMapName={currentMapName}
         scoreboard={
           mpConnected && mpGameStarted

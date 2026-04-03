@@ -1,4 +1,6 @@
 import { type UpgradeOption } from "../systems/PlayerProgressSystem";
+import { HudPanel } from "./components/HudPanel";
+import { UpgradeModal } from "./components/UpgradeModal";
 
 export interface HudProgress {
   level: number;
@@ -7,8 +9,14 @@ export interface HudProgress {
   skillPoints: number;
 }
 
+export interface HudHealth {
+  current: number;
+  max: number;
+}
+
 interface HudOverlayProps {
   progress: HudProgress;
+  health: HudHealth;
   currentMapName: string;
   scoreboard?: Array<{
     id: string;
@@ -28,6 +36,7 @@ interface HudOverlayProps {
 
 export const HudOverlay = ({
   progress,
+  health,
   currentMapName,
   scoreboard,
   levelUpOpen,
@@ -38,13 +47,14 @@ export const HudOverlay = ({
   onConfirmMapChange,
   onUpgrade,
 }: HudOverlayProps) => {
-  const xpPercent = Math.max(
-    0,
-    Math.min(100, (progress.xp / progress.xpToNext) * 100),
-  );
-
   return (
     <>
+      <HudPanel progress={progress} health={health} />
+      <UpgradeModal
+        open={levelUpOpen}
+        options={upgradeOptions}
+        onUpgrade={onUpgrade}
+      />
       <div
         style={{
           position: "absolute",
