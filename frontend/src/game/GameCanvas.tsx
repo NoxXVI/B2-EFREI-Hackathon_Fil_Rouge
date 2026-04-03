@@ -18,7 +18,11 @@ import {
 import { HudOverlay } from "./ui/HudOverlay";
 import { setCameraOffset } from "./systems/AttackSystem";
 
-export const GameCanvas = () => {
+interface GameCanvasProps {
+  onGameOver?: () => void;
+}
+
+export const GameCanvas = ({ onGameOver }: GameCanvasProps) => {
   const engineRef = useRef<GameEngine | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const spritesRef = useRef<Map<number, Sprite>>(new Map());
@@ -29,6 +33,9 @@ export const GameCanvas = () => {
   const mouseXRef = useRef(400);
   const lastLevelRef = useRef(1);
   const levelUpOpenRef = useRef(false);
+  const hasSpawnedPlayerRef = useRef(false);
+  const gameOverSentRef = useRef(false);
+  const onGameOverRef = useRef(onGameOver);
   const [levelUpOpen, setLevelUpOpen] = useState(false);
   const [upgradeOptions, setUpgradeOptions] = useState<UpgradeOption[]>([]);
   const [hudProgress, setHudProgress] = useState({
@@ -51,6 +58,10 @@ export const GameCanvas = () => {
     levelUpOpenRef.current = true;
     setLevelUpOpen(true);
   };
+
+  useEffect(() => {
+    onGameOverRef.current = onGameOver;
+  }, [onGameOver]);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -159,6 +170,13 @@ export const GameCanvas = () => {
         let camY = 0;
 
         const players = engine.world.query(["PlayerTag", "Health", "Position"]);
+        if (players.length > 0) {
+          hasSpawnedPlayerRef.current = true;
+        } else if (hasSpawnedPlayerRef.current && !gameOverSentRef.current) {
+          gameOverSentRef.current = true;
+          onGameOverRef.current?.();
+        }
+
         if (
           players.length > 0 &&
           !engine.world.hasComponent(players[0], "DeadTag")
