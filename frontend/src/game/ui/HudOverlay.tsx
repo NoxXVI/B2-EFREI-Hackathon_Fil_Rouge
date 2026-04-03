@@ -7,11 +7,20 @@ export interface HudProgress {
   skillPoints: number;
 }
 
+export interface MapChangeInfo {
+  level: number;
+  name: string;
+  description: string;
+}
+
 interface HudOverlayProps {
   progress: HudProgress;
   levelUpOpen: boolean;
   upgradeOptions: UpgradeOption[];
   onUpgrade: (option: UpgradeOption) => void;
+  mapChangeOpen: boolean;
+  mapChangeInfo: MapChangeInfo | null;
+  onConfirmMapChange: () => void;
 }
 
 export const HudOverlay = ({
@@ -19,6 +28,9 @@ export const HudOverlay = ({
   levelUpOpen,
   upgradeOptions,
   onUpgrade,
+  mapChangeOpen,
+  mapChangeInfo,
+  onConfirmMapChange,
 }: HudOverlayProps) => {
   const xpPercent = Math.max(
     0,
@@ -123,6 +135,58 @@ export const HudOverlay = ({
                   </div>
                 </button>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {mapChangeOpen && mapChangeInfo && (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "rgba(0,0,0,0.72)",
+            zIndex: 40,
+          }}
+        >
+          <div
+            style={{
+              width: 560,
+              padding: 24,
+              borderRadius: 16,
+              background: "linear-gradient(180deg, #1d2430 0%, #141925 100%)",
+              color: "white",
+              boxShadow: "0 20px 60px rgba(0,0,0,0.55)",
+              border: "1px solid rgba(255,255,255,0.08)",
+            }}
+          >
+            <div style={{ marginBottom: 10, fontSize: 18, opacity: 0.85 }}>
+              Palier atteint — Niveau {mapChangeInfo.level}
+            </div>
+            <div style={{ marginBottom: 10, fontSize: 28, fontWeight: 800 }}>
+              {mapChangeInfo.name}
+            </div>
+            <div style={{ marginBottom: 18, opacity: 0.85, lineHeight: 1.4 }}>
+              {mapChangeInfo.description}
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button
+                onClick={onConfirmMapChange}
+                style={{
+                  padding: "12px 16px",
+                  borderRadius: 12,
+                  border: "1px solid rgba(255,255,255,0.14)",
+                  background: "#2a3342",
+                  color: "white",
+                  cursor: "pointer",
+                  fontWeight: 700,
+                }}
+              >
+                OK — Changer de map
+              </button>
             </div>
           </div>
         </div>

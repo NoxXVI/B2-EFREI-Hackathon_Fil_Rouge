@@ -17,6 +17,11 @@ import {
 } from "./systems/PlayerProgressSystem";
 import { HudOverlay } from "./ui/HudOverlay";
 import { setCameraOffset } from "./systems/AttackSystem";
+import {
+  getMapMeta,
+  getMapThemeForLevel,
+  type MapTheme,
+} from "./systems/MapData";
 
 export const GameCanvas = () => {
   const engineRef = useRef<GameEngine | null>(null);
@@ -31,8 +36,13 @@ export const GameCanvas = () => {
   const mouseXRef = useRef(400);
   const lastLevelRef = useRef(1);
   const levelUpOpenRef = useRef(false);
+  const mapChangeOpenRef = useRef(false);
+  const currentMapThemeRef = useRef<MapTheme | null>(null);
+  const mapChangeRef = useRef<MapChangeState | null>(null);
   const [levelUpOpen, setLevelUpOpen] = useState(false);
   const [upgradeOptions, setUpgradeOptions] = useState<UpgradeOption[]>([]);
+  const [mapChangeOpen, setMapChangeOpen] = useState(false);
+  const [mapChange, setMapChange] = useState<MapChangeState | null>(null);
   const [hudProgress, setHudProgress] = useState({
     level: 1,
     xp: 0,
@@ -74,18 +84,31 @@ export const GameCanvas = () => {
 
       const engine = new GameEngine();
       engineRef.current = engine;
+      currentMapThemeRef.current = engine.mapTheme;
 
       const app = new Application();
       appRef.current = app;
 
+      const initialW =
+        containerRef.current?.clientWidth ||
+        (typeof window !== "undefined" ? window.innerWidth : 800) ||
+        800;
+      const initialH =
+        containerRef.current?.clientHeight ||
+        (typeof window !== "undefined" ? window.innerHeight : 600) ||
+        600;
+
       await app.init({
-        width: 800,
-        height: 600,
+        width: initialW,
+        height: initialH,
         backgroundColor: 0x0a0a0f,
       });
 
       if (!containerRef.current) return;
       containerRef.current.appendChild(app.canvas);
+      app.canvas.style.display = "block";
+      app.canvas.style.width = "100%";
+      app.canvas.style.height = "100%";
 
       const worldContainer = new Sprite();
       app.stage.addChild(worldContainer);
@@ -121,13 +144,31 @@ export const GameCanvas = () => {
       const ticker = app.ticker ?? Ticker.shared;
       ticker.start();
 
+      const resizeToContainer = () => {
+        if (!appRef.current) return;
+        if (!containerRef.current) return;
+        const w = Math.floor(containerRef.current.clientWidth);
+        const h = Math.floor(containerRef.current.clientHeight);
+        if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
+          return;
+        }
+        appRef.current.renderer.resize(w, h);
+      };
+
+      resizeToContainer();
+      const ro =
+        typeof ResizeObserver !== "undefined"
+          ? new ResizeObserver(() => resizeToContainer())
+          : null;
+      ro?.observe(containerRef.current);
+
       const update = () => {
         if (!engineRef.current) return;
         lastFrameAtRef.current =
           typeof performance !== "undefined" ? performance.now() : Date.now();
         const engine = engineRef.current;
 
-        if (!levelUpOpenRef.current) {
+        if (!levelUpOpenRef.current && !mapChangeOpenRef.current) {
           engine.update(ticker.deltaMS);
         }
 
@@ -167,6 +208,28 @@ export const GameCanvas = () => {
             } else if (progress.skillPoints > 0 && !levelUpOpenRef.current) {
               openUpgradeMenu();
             }
+
+            // Changement de map aux paliers (5,10,20,25,35,40,50...)
+            const desiredTheme = getMapThemeForLevel(progress.level);
+            const currentTheme =
+              currentMapThemeRef.current ?? engine.mapTheme ?? "forest";
+            if (
+              desiredTheme !== currentTheme &&
+              !levelUpOpenRef.current &&
+              !mapChangeOpenRef.current
+            ) {
+              const meta = getMapMeta(desiredTheme);
+              const next: MapChangeState = {
+                level: progress.level,
+                theme: desiredTheme,
+                name: meta.name,
+                description: meta.description,
+              };
+              mapChangeRef.current = next;
+              mapChangeOpenRef.current = true;
+              setMapChange(next);
+              setMapChangeOpen(true);
+            }
           }
         }
 
@@ -200,10 +263,12 @@ export const GameCanvas = () => {
           // Camera clamped to map bounds so screen→world aiming stays correct.
           const mapW = engine.tilemapSystem.bounds.width;
           const mapH = engine.tilemapSystem.bounds.height;
-          const maxCamX = Math.max(0, mapW - 800);
-          const maxCamY = Math.max(0, mapH - 600);
-          camX = Math.max(0, Math.min(playerPos.x - 400, maxCamX));
-          camY = Math.max(0, Math.min(playerPos.y - 300, maxCamY));
+          const viewW = appRef.current?.screen.width ?? 800;
+          const viewH = appRef.current?.screen.height ?? 600;
+          const maxCamX = Math.max(0, mapW - viewW);
+          const maxCamY = Math.max(0, mapH - viewH);
+          camX = Math.max(0, Math.min(playerPos.x - viewW / 2, maxCamX));
+          camY = Math.max(0, Math.min(playerPos.y - viewH / 2, maxCamY));
 
           worldContainer.position.set(-camX, -camY);
           setCameraOffset(camX, camY);
@@ -351,7 +416,7 @@ export const GameCanvas = () => {
 
       const fallbackInterval = window.setInterval(() => {
         if (!engineRef.current) return;
-        if (levelUpOpenRef.current) return;
+        if (levelUpOpenRef.current || mapChangeOpenRef.current) return;
 
         const now =
           typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -365,6 +430,7 @@ export const GameCanvas = () => {
       }, 100);
 
       return () => {
+        ro?.disconnect();
         window.clearInterval(fallbackInterval);
         ticker.remove(update);
       };
@@ -385,12 +451,29 @@ export const GameCanvas = () => {
   }, []);
 
   return (
-    <div style={{ position: "relative", width: "800px", height: "600px" }}>
-      <div id="pixi-container" ref={containerRef} />
+    <div style={{ position: "relative", width: "100%", height: "100%" }}>
+      <div
+        id="pixi-container"
+        ref={containerRef}
+        style={{ width: "100%", height: "100%" }}
+      />
       <HudOverlay
         progress={hudProgress}
         levelUpOpen={levelUpOpen}
         upgradeOptions={upgradeOptions}
+        mapChangeOpen={mapChangeOpen}
+        mapChangeInfo={mapChange}
+        onConfirmMapChange={async () => {
+          if (!engineRef.current) return;
+          const change = mapChangeRef.current;
+          if (!change) return;
+          await engineRef.current.changeMap(change.theme, change.level);
+          currentMapThemeRef.current = change.theme;
+          mapChangeRef.current = null;
+          mapChangeOpenRef.current = false;
+          setMapChangeOpen(false);
+          setMapChange(null);
+        }}
         onUpgrade={(option) => {
           if (!engineRef.current) return;
           applyUpgrade(engineRef.current.world, option.type);
@@ -417,3 +500,10 @@ export const GameCanvas = () => {
     </div>
   );
 };
+
+interface MapChangeState {
+  level: number;
+  theme: MapTheme;
+  name: string;
+  description: string;
+}
