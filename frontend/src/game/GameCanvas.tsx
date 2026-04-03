@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Application,
   Sprite,
@@ -70,10 +70,18 @@ function safeHexColor(hex: string): string {
 }
 
 interface GameCanvasProps {
+  mode: "solo" | "multi";
+  initialPlayerName?: string;
+  initialPlayerColor?: string;
   onGameOver?: () => void;
 }
 
-export const GameCanvas = ({ onGameOver }: GameCanvasProps) => {
+export const GameCanvas = ({
+  mode,
+  initialPlayerName,
+  initialPlayerColor,
+  onGameOver,
+}: GameCanvasProps) => {
   const engineRef = useRef<GameEngine | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const spritesRef = useRef<Map<number, Sprite>>(new Map());
@@ -111,13 +119,15 @@ export const GameCanvas = ({ onGameOver }: GameCanvasProps) => {
   const lastMapRequestRef = useRef<MapId | null>(null);
   const pendingMapIdRef = useRef<MapId | null>(null);
 
-  const [lobbyOpen, setLobbyOpen] = useState(true);
+  const [lobbyOpen, setLobbyOpen] = useState(mode === "multi");
   const [playerName, setPlayerName] = useState(() => {
+    if (initialPlayerName?.trim()) return initialPlayerName.trim();
     return typeof localStorage !== "undefined"
       ? (localStorage.getItem("mp_name") ?? "")
       : "";
   });
   const [playerColor, setPlayerColor] = useState(() => {
+    if (initialPlayerColor) return safeHexColor(initialPlayerColor);
     return typeof localStorage !== "undefined"
       ? (localStorage.getItem("mp_color") ?? "#44ccff")
       : "#44ccff";
@@ -142,7 +152,6 @@ export const GameCanvas = ({ onGameOver }: GameCanvasProps) => {
     current: 3,
     max: 3,
   });
-  const [currentMapName, setCurrentMapName] = useState("—");
   const [mapChangeOpen, setMapChangeOpen] = useState(false);
   const [pendingMapId, setPendingMapId] = useState<MapId | null>(null);
   const [isChangingMap, setIsChangingMap] = useState(false);
@@ -198,7 +207,7 @@ export const GameCanvas = ({ onGameOver }: GameCanvasProps) => {
     ws.send(JSON.stringify(payload));
   };
 
-  const applyMapChange = async (mapId: MapId) => {
+  const applyMapChange = useCallback(async (mapId: MapId) => {
     if (!engineRef.current) return;
     if (!appRef.current) return;
     if (engineRef.current.currentMap.id === mapId) return;
@@ -210,7 +219,6 @@ export const GameCanvas = ({ onGameOver }: GameCanvasProps) => {
 
     try {
       await engineRef.current.changeMap(mapId);
-      setCurrentMapName(engineRef.current.currentMap.name);
       appRef.current.renderer.background.color =
         engineRef.current.currentMap.backgroundColor;
     } finally {
@@ -219,9 +227,9 @@ export const GameCanvas = ({ onGameOver }: GameCanvasProps) => {
       setIsChangingMap(false);
       closeMapChangeMenu();
     }
-  };
+  }, []);
 
-  const connectMultiplayer = () => {
+  const connectMultiplayer = useCallback(() => {
     if (mpConnecting || mpConnected) return;
     setMpConnecting(true);
     setMpError(null);
@@ -393,11 +401,27 @@ export const GameCanvas = ({ onGameOver }: GameCanvasProps) => {
       setMpConnecting(false);
       setMpError("Impossible de se connecter au serveur WS.");
     });
-  };
+  }, [
+    applyMapChange,
+    mpConnected,
+    mpConnecting,
+    playerColor,
+    playerName,
+    roomId,
+  ]);
 
   const startMultiplayer = () => {
     sendWs({ type: "startGame" });
   };
+
+  useEffect(() => {
+    const isMulti = mode === "multi";
+    lobbyOpenRef.current = isMulti;
+    setLobbyOpen(isMulti);
+    if (isMulti) {
+      connectMultiplayer();
+    }
+  }, [connectMultiplayer, mode]);
 
   useEffect(() => {
     onGameOverRef.current = onGameOver;
@@ -423,8 +447,6 @@ export const GameCanvas = ({ onGameOver }: GameCanvasProps) => {
 
       const engine = new GameEngine();
       engineRef.current = engine;
-      setCurrentMapName(engine.currentMap.name);
-
       const app = new Application();
       appRef.current = app;
 
@@ -827,7 +849,7 @@ export const GameCanvas = ({ onGameOver }: GameCanvasProps) => {
     <div style={{ position: "relative", width: "800px", height: "600px" }}>
       <div id="pixi-container" ref={containerRef} />
       <MultiplayerLobby
-        open={lobbyOpen}
+        open={mode === "multi" && lobbyOpen}
         roomId={roomId}
         inviteLink={typeof window !== "undefined" ? window.location.href : "—"}
         connecting={mpConnecting}
@@ -869,18 +891,6 @@ export const GameCanvas = ({ onGameOver }: GameCanvasProps) => {
       <HudOverlay
         progress={hudProgress}
         health={hudHealth}
-        currentMapName={currentMapName}
-        scoreboard={
-          mpConnected && mpGameStarted
-            ? mpPlayers.map((p) => ({
-                id: p.id,
-                name: p.name,
-                color: p.color,
-                kills: p.kills,
-                isYou: !!mpYouId && p.id === mpYouId,
-              }))
-            : undefined
-        }
         levelUpOpen={levelUpOpen}
         upgradeOptions={upgradeOptions}
         mapChangeOpen={mapChangeOpen}
@@ -902,7 +912,6 @@ export const GameCanvas = ({ onGameOver }: GameCanvasProps) => {
 
           try {
             await engineRef.current.changeMap(pendingMapId);
-            setCurrentMapName(engineRef.current.currentMap.name);
 
             if (appRef.current) {
               appRef.current.renderer.background.color =
