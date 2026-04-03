@@ -7,6 +7,11 @@ export interface HudProgress {
   skillPoints: number;
 }
 
+export interface HudHealth {
+  current: number;
+  max: number;
+}
+
 export interface MapChangeInfo {
   level: number;
   name: string;

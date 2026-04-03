@@ -5,7 +5,11 @@ import { Position, Velocity } from "../components";
  * Fait en sorte que les entités avec "EnemyTag" se dirigent vers le joueur "PlayerTag"
  */
 export function enemyFollowSystem(world: World) {
-  const players = world.query(["PlayerTag", "Position"]);
+  const localPlayers = world.query(["PlayerTag", "Position", "LocalPlayerTag"]);
+  const players =
+    localPlayers.length > 0
+      ? localPlayers
+      : world.query(["PlayerTag", "Position"]);
   const enemies = world.query(["EnemyTag", "Position", "Velocity"]);
 
   if (players.length === 0) return;

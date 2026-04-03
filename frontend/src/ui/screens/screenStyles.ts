@@ -1,0 +1,16 @@
+export const screenUi = {
+  panelBg: "rgba(18, 14, 24, 0.82)",
+  panelBorder: "#d0b787",
+  panelBorderInner: "#5b4930",
+  title: "#f3d89b",
+  text: "#efe4cc",
+  textMuted: "#c9b998",
+  buttonPrimaryBg: "#a05f1f",
+  buttonPrimaryHover: "#b66f25",
+  buttonPrimaryPress: "#844b17",
+  buttonSecondaryBg: "#2b2537",
+  buttonSecondaryHover: "#3a304b",
+  buttonSecondaryPress: "#221d2d",
+  buttonBorder: "#d0b787",
+  boardBg: "rgba(0, 0, 0, 0.34)",
+} as const;
