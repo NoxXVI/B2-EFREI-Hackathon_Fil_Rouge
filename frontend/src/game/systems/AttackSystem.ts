@@ -72,7 +72,12 @@ export function attackSystem(world: World, deltaMS: number) {
   attackAnimTimer = Math.max(0, attackAnimTimer - deltaMS);
   if (!attackHeld || attackCooldown > 0) return;
 
-  const players = world.query(["PlayerTag", "Position", "CombatStats"]);
+  const players = world.query([
+    "PlayerTag",
+    "Position",
+    "CombatStats",
+    "LocalPlayerTag",
+  ]);
   if (players.length === 0) return;
 
   const player = players[0];
