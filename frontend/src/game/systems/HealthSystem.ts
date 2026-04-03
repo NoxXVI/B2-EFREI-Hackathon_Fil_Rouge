@@ -99,4 +99,29 @@ export function checkDeath(world: World) {
       world.destroyEntity(enemy);
     }
   }
+
+  const bosses = world.query(["BossTag", "Health"]);
+  for (const boss of bosses) {
+    const health = world.getComponent<Health>(boss, "Health")!;
+    if (health.current <= 0 && !health.isDead) {
+      health.isDead = true;
+      grantEnemyXp(world, 10);
+      world.addComponent(boss, "DeadTag", {});
+      world.addComponent(boss, "TimerComponent", {
+        timeLeft: 500,
+      });
+    }
+  }
+
+  const deadBosses = world.query(["BossTag", "DeadTag", "TimerComponent"]);
+  for (const boss of deadBosses) {
+    const timer = world.getComponent<{ timeLeft: number }>(
+      boss,
+      "TimerComponent",
+    )!;
+    timer.timeLeft -= 16;
+    if (timer.timeLeft <= 0) {
+      world.destroyEntity(boss);
+    }
+  }
 }

@@ -4,8 +4,8 @@ export type Entity = number;
 type ComponentMap = Map<Entity, unknown>;
 
 export class World {
+  public entities = new Set<Entity>();
   private nextEntityId: Entity = 0;
-  private entities = new Set<Entity>();
   private components = new Map<string, ComponentMap>();
 
   createEntity(): Entity {

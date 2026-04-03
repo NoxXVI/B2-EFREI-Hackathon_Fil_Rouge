@@ -65,7 +65,17 @@ export type RemotePlayerTag = Record<string, never>;
 export type EnemyTag = Record<string, never>;
 export type ProjectileTag = Record<string, never>;
 export type DeadTag = Record<string, never>;
+export type LaserTag = Record<string, never>;
 
 export type TimerComponent = {
   timeLeft: number;
 };
+
+export interface LaserStats {
+  length: number;
+  damage: number;
+}
+
+export interface FollowTarget {
+  entity: number;
+}

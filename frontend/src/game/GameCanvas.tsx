@@ -6,6 +6,7 @@ import {
   SCALE_MODES,
   Assets,
   Texture,
+  Graphics,
 } from "pixi.js";
 import { GameEngine } from "./GameEngine";
 import { Position, Health } from "./components";
@@ -77,6 +78,7 @@ export const GameCanvas = () => {
   const heartTextureRef = useRef<Texture | null>(null);
   const heartSpritesRef = useRef<Sprite[]>([]);
   const lastFrameAtRef = useRef(0);
+  const laserContainerRef = useRef<Sprite | null>(null);
   const mouseXRef = useRef(400);
   const lastLevelRef = useRef(1);
   const levelUpOpenRef = useRef(false);
@@ -432,11 +434,16 @@ export const GameCanvas = () => {
       // Map layer (background)
       worldContainer.addChild(engine.tilemapSystem.container);
 
-      // Entities layer (player, enemies, projectiles)
+      const laserContainer = new Sprite();
+      worldContainer.addChild(laserContainer);
+      laserContainerRef.current = laserContainer;
+
       const spriteContainer = new Sprite();
       worldContainer.addChild(spriteContainer);
 
-      // HUD layer (hearts, overlays)
+      const bossContainer = new Sprite();
+      worldContainer.addChild(bossContainer);
+
       const heartsContainer = new Sprite();
       app.stage.addChild(heartsContainer);
 
@@ -587,38 +594,85 @@ export const GameCanvas = () => {
           let sprite = spritesRef.current.get(entityId);
 
           if (!sprite) {
+            // PROJECTILE
             if (
               engine.world.hasComponent(entityId, "ProjectileTag") &&
               arrowTextureRef.current
             ) {
               sprite = new Sprite(arrowTextureRef.current);
               sprite.anchor.set(spriteComp.anchor);
+
               spriteContainer.addChild(sprite);
               spritesRef.current.set(entityId, sprite);
-            } else {
+            }
+
+            // NORMAL / ANIMATION
+            else if (
+              !engine.world.hasComponent(entityId, "LaserTag") ||
+              engine.world.hasComponent(entityId, "BossTag")
+            ) {
               const animTexture =
                 engine.animationSystem.getCurrentTexture(entityId);
+
               if (animTexture) {
                 animTexture.baseTexture.scaleMode = SCALE_MODES.NEAREST;
+
                 sprite = new Sprite(animTexture);
                 sprite.anchor.set(spriteComp.anchor);
                 sprite.width = spriteComp.width;
                 sprite.height = spriteComp.height;
-                spriteContainer.addChild(sprite);
+
+                if (engine.world.hasComponent(entityId, "BossTag")) {
+                  bossContainer.addChild(sprite);
+                } else {
+                  spriteContainer.addChild(sprite);
+                }
                 spritesRef.current.set(entityId, sprite);
               }
             }
+
+            // LASER (only create once, not for boss)
+            if (!sprite && engine.world.hasComponent(entityId, "LaserTag")) {
+              const vel = engine.world.getComponent<{ vx: number; vy: number }>(
+                entityId,
+                "Velocity",
+              );
+              const stats = engine.world.getComponent<{ length: number }>(
+                entityId,
+                "LaserStats",
+              );
+
+              if (vel && stats && laserContainerRef.current) {
+                const laserGraphics = new Graphics();
+                laserGraphics.rect(0, 0, stats.length, spriteComp.width);
+                laserGraphics.fill(0xff0000);
+                laserGraphics.rotation = Math.atan2(vel.vy, vel.vx);
+
+                laserContainerRef.current.addChild(laserGraphics);
+
+                spritesRef.current.set(
+                  entityId,
+                  laserGraphics as unknown as Sprite,
+                );
+
+                sprite = laserGraphics as unknown as Sprite;
+              }
+            }
           } else {
-            const newTexture =
-              engine.animationSystem.getCurrentTexture(entityId);
-            if (newTexture) {
-              newTexture.baseTexture.scaleMode = SCALE_MODES.NEAREST;
-              if (sprite.texture !== newTexture) {
-                sprite.texture = newTexture;
+            // ⚠️ IMPORTANT → ne pas toucher aux lasers
+            if (!engine.world.hasComponent(entityId, "LaserTag")) {
+              const newTexture =
+                engine.animationSystem.getCurrentTexture(entityId);
+
+              if (newTexture) {
+                newTexture.baseTexture.scaleMode = SCALE_MODES.NEAREST;
+
+                if ("texture" in sprite && sprite.texture !== newTexture) {
+                  sprite.texture = newTexture;
+                }
               }
             }
           }
-
           if (sprite) {
             sprite.position.set(pos.x, pos.y);
 
@@ -711,7 +765,9 @@ export const GameCanvas = () => {
 
         for (const [id, sprite] of spritesRef.current) {
           if (!activeEntityIds.has(id)) {
-            spriteContainer.removeChild(sprite);
+            if (sprite.parent) {
+              sprite.parent.removeChild(sprite);
+            }
             sprite.destroy();
             spritesRef.current.delete(id);
           }

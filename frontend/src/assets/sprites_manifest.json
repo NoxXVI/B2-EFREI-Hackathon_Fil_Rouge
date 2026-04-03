@@ -9,6 +9,16 @@
     "assets/orc/walk/orc_walk_6.png",
     "assets/orc/walk/orc_walk_7.png"
   ],
+  "boss_walk": [
+    "assets/orc/walk/orc_walk_0.png",
+    "assets/orc/walk/orc_walk_1.png",
+    "assets/orc/walk/orc_walk_2.png",
+    "assets/orc/walk/orc_walk_3.png",
+    "assets/orc/walk/orc_walk_4.png",
+    "assets/orc/walk/orc_walk_5.png",
+    "assets/orc/walk/orc_walk_6.png",
+    "assets/orc/walk/orc_walk_7.png"
+  ],
   "soldier_walk": [
     "assets/soldier/walk/soldier_walk_0.png",
     "assets/soldier/walk/soldier_walk_1.png",
