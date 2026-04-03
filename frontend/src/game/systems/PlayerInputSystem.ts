@@ -12,7 +12,7 @@ window.addEventListener("keyup", (e) => {
 });
 
 export function playerInputSystem(world: World) {
-  const players = world.query(["PlayerTag", "Velocity"]);
+  const players = world.query(["PlayerTag", "Velocity", "LocalPlayerTag"]);
 
   for (const player of players) {
     const vel = world.getComponent<Velocity>(player, "Velocity")!;

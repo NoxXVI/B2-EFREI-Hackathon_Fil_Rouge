@@ -1,6 +1,7 @@
 import { World } from "../ecs/World";
 import { Position, Health, Invulnerable } from "../components";
 import { grantEnemyXp } from "./PlayerProgressSystem";
+import { addLocalKills } from "./ScoreSystem";
 
 const PLAYER_DAMAGE = 1;
 const INVULNERABILITY_DURATION = 1500;
@@ -79,6 +80,7 @@ export function checkDeath(world: World) {
     if (health.current <= 0 && !health.isDead) {
       health.isDead = true;
       grantEnemyXp(world, 1);
+      addLocalKills(world, 1);
       world.addComponent(enemy, "DeadTag", {});
       world.addComponent(enemy, "TimerComponent", {
         timeLeft: 250,
@@ -104,6 +106,7 @@ export function checkDeath(world: World) {
     if (health.current <= 0 && !health.isDead) {
       health.isDead = true;
       grantEnemyXp(world, 10);
+      addLocalKills(world, 10);
       world.addComponent(boss, "DeadTag", {});
       world.addComponent(boss, "TimerComponent", {
         timeLeft: 500,

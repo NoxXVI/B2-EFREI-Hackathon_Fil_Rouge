@@ -23,6 +23,7 @@ import {
   Velocity,
   SpriteComponent,
   Health,
+  type PlayerAppearance,
   type PlayerProgress,
 } from "./components";
 import { SpriteManifest } from "./components/Animation";
@@ -80,6 +81,10 @@ export class GameEngine {
   public animationSystem: AnimationSystem;
   public tilemapSystem: TilemapSystem; // ← NOUVEAU
   private currentMap: GeneratedMap;
+  private readonly remotePlayerEntities = new Map<string, number>();
+  private readonly initPromise: Promise<void>;
+  private pendingLocalAppearance: { name: string; color: number } | null = null;
+  private pendingLocalNetworkId: string | null = null;
   private spawnableFloorTiles: Array<[number, number]>;
   private spawnTimer = 0;
   private spawnIndex = 0; // ← pour tourner sur les spawn points
@@ -94,7 +99,7 @@ export class GameEngine {
     this.tilemapSystem = new TilemapSystem(); // ← NOUVEAU
     this.currentMap = generateMap(getMapThemeForLevel(1));
     this.spawnableFloorTiles = this.buildSpawnableFloorTiles(this.currentMap);
-    this.initGame();
+    this.initPromise = this.initGame();
   }
 
   get mapTheme(): MapTheme {
@@ -110,6 +115,7 @@ export class GameEngine {
   }
 
   async changeMap(theme: MapTheme, level: number) {
+    await this.initPromise;
     const safeLevel = Math.max(1, Math.floor(level));
     const nextMap = generateMap(theme);
 
@@ -123,8 +129,8 @@ export class GameEngine {
     await this.tilemapSystem.loadMap(nextMap);
 
     // Téléporte le joueur sur le spawn de la nouvelle map
-    const player = this.world.query(["PlayerTag", "Position"])[0];
-    if (player !== undefined) {
+    const player = this.getLocalPlayerEntity();
+    if (player !== null) {
       const pos = this.world.getComponent<Position>(player, "Position")!;
       pos.x = nextMap.playerSpawn[0];
       pos.y = nextMap.playerSpawn[1];
@@ -164,6 +170,7 @@ export class GameEngine {
     // Joueur spawn sur le point de spawn de la map
     const player = this.world.createEntity();
     this.world.addComponent(player, "PlayerTag", {});
+    this.world.addComponent(player, "LocalPlayerTag", {});
     this.world.addComponent<Position>(player, "Position", {
       x: this.currentMap.playerSpawn[0], // ← utilise le spawn de la map
       y: this.currentMap.playerSpawn[1],
@@ -183,6 +190,21 @@ export class GameEngine {
       height: 48,
       anchor: 0.5,
     });
+    this.world.addComponent<PlayerAppearance>(player, "PlayerAppearance", {
+      name: "You",
+      color: 0xffffff,
+    });
+
+    if (this.pendingLocalAppearance) {
+      const { name, color } = this.pendingLocalAppearance;
+      this.pendingLocalAppearance = null;
+      this.setLocalPlayerAppearance(name, color);
+    }
+    if (this.pendingLocalNetworkId) {
+      const id = this.pendingLocalNetworkId;
+      this.pendingLocalNetworkId = null;
+      this.setLocalNetworkId(id);
+    }
 
     await this.animationSystem.loadAnimations(player, createSoldierManifest(), {
       idle: { speed: 1, loop: true },
@@ -200,6 +222,140 @@ export class GameEngine {
     for (let i = 0; i < initialEnemies; i++) {
       await this.spawnOrc(settings.maxEnemies, level);
     }
+  }
+
+  getLocalPlayerEntity(): number | null {
+    return this.world.query(["PlayerTag", "LocalPlayerTag"])[0] ?? null;
+  }
+
+  setLocalPlayerAppearance(name: string, color: number) {
+    const player = this.getLocalPlayerEntity();
+    if (player === null) {
+      this.pendingLocalAppearance = { name, color };
+      return;
+    }
+
+    if (!this.world.hasComponent(player, "PlayerAppearance")) {
+      this.world.addComponent<PlayerAppearance>(player, "PlayerAppearance", {
+        name,
+        color,
+      });
+      return;
+    }
+
+    const appearance = this.world.getComponent<PlayerAppearance>(
+      player,
+      "PlayerAppearance",
+    )!;
+    appearance.name = name;
+    appearance.color = color;
+  }
+
+  setLocalNetworkId(id: string) {
+    const player = this.getLocalPlayerEntity();
+    if (player === null) {
+      this.pendingLocalNetworkId = id;
+      return;
+    }
+    this.world.addComponent(player, "NetworkPlayer", { id });
+  }
+
+  upsertRemotePlayer(data: {
+    id: string;
+    name: string;
+    color: number;
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+  }) {
+    const networkId = data.id;
+    if (!networkId) return;
+
+    let entity = this.remotePlayerEntities.get(networkId);
+    if (
+      entity === undefined ||
+      !this.world.hasComponent(entity, "RemotePlayerTag")
+    ) {
+      entity = this.world.createEntity();
+      this.remotePlayerEntities.set(networkId, entity);
+
+      this.world.addComponent(entity, "PlayerTag", {});
+      this.world.addComponent(entity, "RemotePlayerTag", {});
+      this.world.addComponent(entity, "NetworkPlayer", { id: networkId });
+      this.world.addComponent<Position>(entity, "Position", {
+        x: data.x,
+        y: data.y,
+      });
+      this.world.addComponent<Velocity>(entity, "Velocity", {
+        vx: data.vx,
+        vy: data.vy,
+        speed: 0,
+      });
+      this.world.addComponent<SpriteComponent>(entity, "SpriteComponent", {
+        width: 48,
+        height: 48,
+        anchor: 0.5,
+      });
+      this.world.addComponent<PlayerAppearance>(entity, "PlayerAppearance", {
+        name: data.name,
+        color: data.color,
+      });
+
+      if (!this.animationSystem.hasAnimation(entity)) {
+        void this.animationSystem
+          .loadAnimations(entity, createSoldierManifest(), {
+            idle: { speed: 1, loop: true },
+            walk: { speed: 10, loop: true },
+            attack: { speed: 15, loop: true },
+            death: { speed: 8, loop: false },
+          })
+          .catch((err) => {
+            console.warn(
+              "[GameEngine] Failed to load remote player anims",
+              err,
+            );
+          });
+      }
+    }
+
+    const pos = this.world.getComponent<Position>(entity, "Position");
+    if (pos) {
+      pos.x = data.x;
+      pos.y = data.y;
+    }
+
+    const vel = this.world.getComponent<Velocity>(entity, "Velocity");
+    if (vel) {
+      vel.vx = data.vx;
+      vel.vy = data.vy;
+      vel.speed = 0;
+    }
+
+    const appearance = this.world.getComponent<PlayerAppearance>(
+      entity,
+      "PlayerAppearance",
+    );
+    if (appearance) {
+      appearance.name = data.name;
+      appearance.color = data.color;
+    } else {
+      this.world.addComponent<PlayerAppearance>(entity, "PlayerAppearance", {
+        name: data.name,
+        color: data.color,
+      });
+    }
+  }
+
+  removeRemotePlayer(networkId: string) {
+    const entity = this.remotePlayerEntities.get(networkId);
+    if (entity === undefined) return;
+    this.remotePlayerEntities.delete(networkId);
+    this.world.destroyEntity(entity);
+  }
+
+  getRemotePlayerIds(): string[] {
+    return [...this.remotePlayerEntities.keys()];
   }
 
   update(deltaMS: number) {
@@ -309,7 +465,11 @@ export class GameEngine {
   }
 
   private pickSpawnPositionPixels(level: number): [number, number] {
-    const playerEntity = this.world.query(["PlayerTag", "Position"])[0];
+    const playerEntity = this.world.query([
+      "PlayerTag",
+      "LocalPlayerTag",
+      "Position",
+    ])[0];
     const playerPos =
       playerEntity !== undefined
         ? this.world.getComponent<Position>(playerEntity, "Position")
@@ -348,7 +508,11 @@ export class GameEngine {
   }
 
   private pickBossSpawnPositionPixels(level: number): [number, number] {
-    const playerEntity = this.world.query(["PlayerTag", "Position"])[0];
+    const playerEntity = this.world.query([
+      "PlayerTag",
+      "LocalPlayerTag",
+      "Position",
+    ])[0];
     const playerPos =
       playerEntity !== undefined
         ? this.world.getComponent<Position>(playerEntity, "Position")
@@ -444,7 +608,8 @@ export class GameEngine {
         continue;
       }
       const vel = this.world.getComponent<Velocity>(player, "Velocity")!;
-      if (getAttackTriggered()) {
+      const isLocal = this.world.hasComponent(player, "LocalPlayerTag");
+      if (isLocal && getAttackTriggered()) {
         this.animationSystem.setAnimation(player, "attack");
       } else if (vel.vx !== 0 || vel.vy !== 0) {
         this.animationSystem.setAnimation(player, "walk");

@@ -233,6 +233,7 @@ export class TilemapSystem {
     const entities = world.query(["Position", "Velocity"]);
 
     for (const id of entities) {
+      if (world.hasComponent(id, "RemotePlayerTag")) continue;
       const pos = world.getComponent<Position>(id, "Position")!;
       const radius = 16; // demi-taille du sprite
 
