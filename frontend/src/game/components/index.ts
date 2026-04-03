@@ -27,6 +27,15 @@ export interface SpriteComponent {
   anchor: number;
 }
 
+export interface PlayerAppearance {
+  name: string;
+  color: number;
+}
+
+export interface NetworkPlayer {
+  id: string;
+}
+
 export interface PlayerProgress {
   level: number;
   xp: number;
@@ -51,6 +60,8 @@ export interface ProjectileStats {
 }
 
 export type PlayerTag = Record<string, never>;
+export type LocalPlayerTag = Record<string, never>;
+export type RemotePlayerTag = Record<string, never>;
 export type EnemyTag = Record<string, never>;
 export type ProjectileTag = Record<string, never>;
 export type DeadTag = Record<string, never>;
