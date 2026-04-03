@@ -1,4 +1,3 @@
-// GameEngine.ts — modifié pour intégrer la map tilemap
 import { World } from "./ecs/World";
 import { movementSystem } from "./systems/MovementSystem";
 import { enemyFollowSystem } from "./systems/EnemyFollowSystem";
@@ -11,6 +10,12 @@ import {
   getAttackTriggered,
   projectileSystem,
 } from "./systems/AttackSystem";
+import {
+  bossSystem,
+  laserSystem,
+  cleanupLaserEntities,
+  spawnBoss,
+} from "./systems/BossSystem";
 import { AnimationSystem } from "./systems/AnimationSystem";
 import { TilemapSystem } from "./systems/TilemapSystem"; // ← NOUVEAU
 import { Position, Velocity, SpriteComponent, Health } from "./components";
@@ -36,7 +41,10 @@ export class GameEngine {
   private spawnTimer = 0;
   private readonly spawnInterval = 2500;
   private readonly maxEnemies = 20;
+  private bossSpawnTimer = 3000;
+  private bossSpawned = false;
   private spawnIndex = 0; // ← pour tourner sur les spawn points
+  private spawnIntervalStepPerLevelMS: number | undefined;
 
   constructor() {
     this.world = new World();
@@ -90,16 +98,29 @@ export class GameEngine {
   update(deltaMS: number) {
     // Safety net: keep progression components present even if init was interrupted.
     ensurePlayerProgress(this.world);
+    const level = this.getCurrentLevel();
+    const maxEnemies = this.getMaxEnemies(level);
+    const spawnIntervalMS = this.getSpawnIntervalMS(level);
 
     this.spawnTimer += deltaMS;
-    if (this.spawnTimer >= this.spawnInterval) {
-      this.spawnTimer = 0;
-      void this.spawnOrc();
+    while (this.spawnTimer >= spawnIntervalMS) {
+      this.spawnTimer -= spawnIntervalMS;
+      void this.spawnOrc(maxEnemies);
+    }
+
+    if (!this.bossSpawned) {
+      this.bossSpawnTimer -= deltaMS;
+      if (this.bossSpawnTimer <= 0) {
+        this.bossSpawned = true;
+        spawnBoss(this.world, 1000, 300, this.animationSystem);
+      }
     }
 
     playerInputSystem(this.world);
     attackSystem(this.world, deltaMS);
     projectileSystem(this.world);
+    bossSystem(this.world, deltaMS);
+    laserSystem(this.world, deltaMS);
     enemyFollowSystem(this.world);
     collisionAvoidanceSystem(this.world);
     movementSystem(this.world, deltaMS);
@@ -109,6 +130,7 @@ export class GameEngine {
 
     healthSystem(this.world, deltaMS);
     checkDeath(this.world);
+    cleanupLaserEntities(this.world);
     this.animationSystem.update(this.world, deltaMS);
     this.updateAnimations();
   }
@@ -152,6 +174,35 @@ export class GameEngine {
     });
   }
 
+  private clamp(value: number, min: number, max: number): number {
+    return Math.max(min, Math.min(max, value));
+  }
+
+  private getCurrentLevel(): number {
+    const progressionEntity = this.world.query([
+      "ProgressionTag",
+      "PlayerProgress",
+    ])[0];
+    if (progressionEntity === undefined) return 1;
+
+    const progress = this.world.getComponent<PlayerProgress>(
+      progressionEntity,
+      "PlayerProgress",
+    );
+    return progress?.level ?? 1;
+  }
+
+  private getMaxEnemies(level: number): number {
+    return this.baseMaxEnemies + (level - 1) * this.maxEnemiesStepPerLevel;
+  }
+
+  private getSpawnIntervalMS(level: number): number {
+    return Math.max(
+      this.minSpawnIntervalMS,
+      this.baseSpawnIntervalMS - (level - 1) * this.spawnIntervalStepPerLevelMS,
+    );
+  }
+
   private updateAnimations() {
     const players = this.world.query(["PlayerTag", "Velocity"]);
     for (const player of players) {
@@ -174,6 +225,14 @@ export class GameEngine {
       const vel = this.world.getComponent<Velocity>(enemy, "Velocity")!;
       if (vel.vx !== 0 || vel.vy !== 0) {
         this.animationSystem.setAnimation(enemy, "walk");
+      }
+    }
+
+    const bosses = this.world.query(["BossTag", "Velocity"]);
+    for (const boss of bosses) {
+      const vel = this.world.getComponent<Velocity>(boss, "Velocity")!;
+      if (vel.vx !== 0 || vel.vy !== 0) {
+        this.animationSystem.setAnimation(boss, "walk");
       }
     }
   }
