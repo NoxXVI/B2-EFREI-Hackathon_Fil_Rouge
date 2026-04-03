@@ -11,29 +11,41 @@ const PROJECTILE_SPEED = 8;
 const PROJECTILE_DAMAGE = 1;
 const PROJECTILE_LIFETIME = 60;
 const BASE_FIRE_COOLDOWN = 250;
-const VIEW_CENTER_X = 400;
-const VIEW_CENTER_Y = 300;
+const ATTACK_ANIMATION_HOLD_MS = 600;
 
 let mouseX = 0;
 let mouseY = 0;
 let attackHeld = false;
 let attackCooldown = 0;
+let cameraX = 0;
+let cameraY = 0;
+let attackAnimTimer = 0;
 
-window.addEventListener("mousemove", (e) => {
-  const canvas = document.getElementById("pixi-container");
-  if (canvas) {
-    const rect = canvas.getBoundingClientRect();
+export function setCameraOffset(x: number, y: number) {
+  cameraX = x;
+  cameraY = y;
+}
+
+function updateMousePosition(e: MouseEvent) {
+  const container = document.getElementById("pixi-container");
+  if (container) {
+    const rect = container.getBoundingClientRect();
     mouseX = e.clientX - rect.left;
     mouseY = e.clientY - rect.top;
   } else {
     mouseX = e.clientX;
     mouseY = e.clientY;
   }
+}
+
+window.addEventListener("mousemove", (e) => {
+  updateMousePosition(e);
 });
 
 window.addEventListener("mousedown", (e) => {
   if (e.button === 0) {
     attackHeld = true;
+    updateMousePosition(e);
   }
 });
 
@@ -48,15 +60,16 @@ window.addEventListener("contextmenu", (e) => {
 });
 
 export function getAttackTriggered(): boolean {
-  return attackHeld;
+  return attackAnimTimer > 0;
 }
 
 export function resetAttackTrigger() {
-  attackHeld = false;
+  attackAnimTimer = 0;
 }
 
 export function attackSystem(world: World, deltaMS: number) {
   attackCooldown = Math.max(0, attackCooldown - deltaMS);
+  attackAnimTimer = Math.max(0, attackAnimTimer - deltaMS);
   if (!attackHeld || attackCooldown > 0) return;
 
   const players = world.query(["PlayerTag", "Position", "CombatStats"]);
@@ -76,15 +89,13 @@ export function attackSystem(world: World, deltaMS: number) {
     homingStrength: 0,
   };
 
-  // Mouse input is in screen-space; convert it to world-space using camera center.
-  const targetWorldX = mouseX + (playerPos.x - VIEW_CENTER_X);
-  const targetWorldY = mouseY + (playerPos.y - VIEW_CENTER_Y);
-  const dx = targetWorldX - playerPos.x;
-  const dy = targetWorldY - playerPos.y;
+  const targetX = mouseX + cameraX;
+  const targetY = mouseY + cameraY;
+  const dx = targetX - playerPos.x;
+  const dy = targetY - playerPos.y;
   const length = Math.sqrt(dx * dx + dy * dy);
 
   if (length === 0) {
-    resetAttackTrigger();
     return;
   }
 
@@ -128,6 +139,7 @@ export function attackSystem(world: World, deltaMS: number) {
   }
 
   attackCooldown = BASE_FIRE_COOLDOWN * combatStats.fireRateMultiplier;
+  attackAnimTimer = ATTACK_ANIMATION_HOLD_MS;
 }
 
 export function projectileSystem(world: World) {
