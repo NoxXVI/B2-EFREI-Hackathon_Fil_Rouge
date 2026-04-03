@@ -24,8 +24,6 @@ export const GameCanvas = () => {
   const spritesRef = useRef<Map<number, Sprite>>(new Map());
   const appRef = useRef<Application | null>(null);
   const arrowTextureRef = useRef<Texture | null>(null);
-  const heartTextureRef = useRef<Texture | null>(null);
-  const heartSpritesRef = useRef<Sprite[]>([]);
   const lastFrameAtRef = useRef(0);
   const laserContainerRef = useRef<Sprite | null>(null);
   const mouseXRef = useRef(400);
@@ -38,6 +36,10 @@ export const GameCanvas = () => {
     xp: 0,
     xpToNext: 5,
     skillPoints: 0,
+  });
+  const [hudHealth, setHudHealth] = useState({
+    current: 3,
+    max: 3,
   });
 
   const openUpgradeMenu = () => {
@@ -67,10 +69,6 @@ export const GameCanvas = () => {
       const arrowTex = await Assets.load("/assets/projectile/arrow.png");
       arrowTex.baseTexture.scaleMode = SCALE_MODES.NEAREST;
       arrowTextureRef.current = arrowTex;
-
-      const heartTex = await Assets.load("/assets/heart.png");
-      heartTex.baseTexture.scaleMode = SCALE_MODES.NEAREST;
-      heartTextureRef.current = heartTex;
 
       const engine = new GameEngine();
       engineRef.current = engine;
@@ -102,19 +100,6 @@ export const GameCanvas = () => {
 
       const bossContainer = new Sprite();
       worldContainer.addChild(bossContainer);
-
-      const heartsContainer = new Sprite();
-      app.stage.addChild(heartsContainer);
-
-      for (let i = 0; i < 3; i++) {
-        const heartSprite = new Sprite(heartTex);
-        heartSprite.anchor.set(0.5);
-        heartSprite.x = 40 + i * 60;
-        heartSprite.y = 40;
-        heartSprite.scale.set(1);
-        heartsContainer.addChild(heartSprite);
-        heartSpritesRef.current.push(heartSprite);
-      }
 
       await new Promise((resolve) => setTimeout(resolve, 500));
 
@@ -183,13 +168,19 @@ export const GameCanvas = () => {
             "Health",
           );
           if (playerHealth) {
-            for (let i = 0; i < heartSpritesRef.current.length; i++) {
-              if (i < playerHealth.current) {
-                heartSpritesRef.current[i].tint = 0xffffff;
-              } else {
-                heartSpritesRef.current[i].tint = 0x888888;
+            setHudHealth((prev) => {
+              if (
+                prev.current === playerHealth.current &&
+                prev.max === playerHealth.max
+              ) {
+                return prev;
               }
-            }
+
+              return {
+                current: playerHealth.current,
+                max: playerHealth.max,
+              };
+            });
           }
 
           const playerPos = engine.world.getComponent<Position>(
@@ -389,6 +380,7 @@ export const GameCanvas = () => {
       <div id="pixi-container" ref={containerRef} />
       <HudOverlay
         progress={hudProgress}
+        health={hudHealth}
         levelUpOpen={levelUpOpen}
         upgradeOptions={upgradeOptions}
         onUpgrade={(option) => {
