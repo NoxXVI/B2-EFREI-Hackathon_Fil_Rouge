@@ -45,5 +45,118 @@
     "assets/soldier/death/soldier_death_1.png",
     "assets/soldier/death/soldier_death_2.png",
     "assets/soldier/death/soldier_death_3.png"
+  ],
+  "skeleton_walk": [
+    "assets/skeleton/walk/skeleton_walk_0.png",
+    "assets/skeleton/walk/skeleton_walk_1.png",
+    "assets/skeleton/walk/skeleton_walk_2.png",
+    "assets/skeleton/walk/skeleton_walk_3.png",
+    "assets/skeleton/walk/skeleton_walk_4.png",
+    "assets/skeleton/walk/skeleton_walk_5.png",
+    "assets/skeleton/walk/skeleton_walk_6.png",
+    "assets/skeleton/walk/skeleton_walk_7.png"
+  ],
+  "skeleton_attack": [
+    "assets/skeleton/attack/skeleton_attack_0.png",
+    "assets/skeleton/attack/skeleton_attack_1.png",
+    "assets/skeleton/attack/skeleton_attack_2.png",
+    "assets/skeleton/attack/skeleton_attack_3.png",
+    "assets/skeleton/attack/skeleton_attack_4.png",
+    "assets/skeleton/attack/skeleton_attack_5.png",
+    "assets/skeleton/attack/skeleton_attack_6.png"
+  ],
+  "skeleton_death": [
+    "assets/skeleton/death/skeleton_death_0.png",
+    "assets/skeleton/death/skeleton_death_1.png",
+    "assets/skeleton/death/skeleton_death_2.png",
+    "assets/skeleton/death/skeleton_death_3.png"
+  ],
+  "skeleton_archer_walk": [
+    "assets/skeleton_archer/walk/skeleton_archer_walk_0.png",
+    "assets/skeleton_archer/walk/skeleton_archer_walk_1.png",
+    "assets/skeleton_archer/walk/skeleton_archer_walk_2.png",
+    "assets/skeleton_archer/walk/skeleton_archer_walk_3.png",
+    "assets/skeleton_archer/walk/skeleton_archer_walk_4.png",
+    "assets/skeleton_archer/walk/skeleton_archer_walk_5.png",
+    "assets/skeleton_archer/walk/skeleton_archer_walk_6.png",
+    "assets/skeleton_archer/walk/skeleton_archer_walk_7.png"
+  ],
+  "skeleton_archer_attack": [
+    "assets/skeleton_archer/attack/skeleton_archer_attack_0.png",
+    "assets/skeleton_archer/attack/skeleton_archer_attack_1.png",
+    "assets/skeleton_archer/attack/skeleton_archer_attack_2.png",
+    "assets/skeleton_archer/attack/skeleton_archer_attack_3.png",
+    "assets/skeleton_archer/attack/skeleton_archer_attack_4.png",
+    "assets/skeleton_archer/attack/skeleton_archer_attack_5.png",
+    "assets/skeleton_archer/attack/skeleton_archer_attack_6.png",
+    "assets/skeleton_archer/attack/skeleton_archer_attack_7.png",
+    "assets/skeleton_archer/attack/skeleton_archer_attack_8.png"
+  ],
+  "skeleton_archer_death": [
+    "assets/skeleton_archer/death/skeleton_archer_death_0.png",
+    "assets/skeleton_archer/death/skeleton_archer_death_1.png",
+    "assets/skeleton_archer/death/skeleton_archer_death_2.png",
+    "assets/skeleton_archer/death/skeleton_archer_death_3.png"
+  ],
+  "lancer_walk": [
+    "assets/lancer/walk/lancer_walk_0.png",
+    "assets/lancer/walk/lancer_walk_1.png",
+    "assets/lancer/walk/lancer_walk_2.png",
+    "assets/lancer/walk/lancer_walk_3.png",
+    "assets/lancer/walk/lancer_walk_4.png",
+    "assets/lancer/walk/lancer_walk_5.png",
+    "assets/lancer/walk/lancer_walk_6.png",
+    "assets/lancer/walk/lancer_walk_7.png",
+    "assets/lancer/walk/lancer_walk_8.png",
+    "assets/lancer/walk/lancer_walk_9.png",
+    "assets/lancer/walk/lancer_walk_10.png",
+    "assets/lancer/walk/lancer_walk_11.png",
+    "assets/lancer/walk/lancer_walk_12.png",
+    "assets/lancer/walk/lancer_walk_13.png",
+    "assets/lancer/walk/lancer_walk_14.png",
+    "assets/lancer/walk/lancer_walk_15.png"
+  ],
+  "lancer_attack": [
+    "assets/lancer/attack/lancer_attack_0.png",
+    "assets/lancer/attack/lancer_attack_1.png",
+    "assets/lancer/attack/lancer_attack_2.png",
+    "assets/lancer/attack/lancer_attack_3.png",
+    "assets/lancer/attack/lancer_attack_4.png",
+    "assets/lancer/attack/lancer_attack_5.png",
+    "assets/lancer/attack/lancer_attack_6.png",
+    "assets/lancer/attack/lancer_attack_7.png"
+  ],
+  "lancer_death": [
+    "assets/lancer/death/lancer_death_0.png",
+    "assets/lancer/death/lancer_death_1.png",
+    "assets/lancer/death/lancer_death_2.png",
+    "assets/lancer/death/lancer_death_3.png"
+  ],
+  "priest_walk": [
+    "assets/priest/walk/priest_walk_0.png",
+    "assets/priest/walk/priest_walk_1.png",
+    "assets/priest/walk/priest_walk_2.png",
+    "assets/priest/walk/priest_walk_3.png",
+    "assets/priest/walk/priest_walk_4.png",
+    "assets/priest/walk/priest_walk_5.png",
+    "assets/priest/walk/priest_walk_6.png",
+    "assets/priest/walk/priest_walk_7.png"
+  ],
+  "priest_attack": [
+    "assets/priest/attack/priest_attack_0.png",
+    "assets/priest/attack/priest_attack_1.png",
+    "assets/priest/attack/priest_attack_2.png",
+    "assets/priest/attack/priest_attack_3.png",
+    "assets/priest/attack/priest_attack_4.png",
+    "assets/priest/attack/priest_attack_5.png",
+    "assets/priest/attack/priest_attack_6.png",
+    "assets/priest/attack/priest_attack_7.png",
+    "assets/priest/attack/priest_attack_8.png"
+  ],
+  "priest_death": [
+    "assets/priest/death/priest_death_0.png",
+    "assets/priest/death/priest_death_1.png",
+    "assets/priest/death/priest_death_2.png",
+    "assets/priest/death/priest_death_3.png"
   ]
 }
