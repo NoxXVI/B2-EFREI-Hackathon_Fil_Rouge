@@ -4,14 +4,19 @@ import {
   Velocity,
   Health,
   CombatStats,
+  type ProjectileAppearance,
   ProjectileStats,
+  type WeaponState,
 } from "../components";
+import { getWeaponSpec } from "../config/weapons";
 
-const PROJECTILE_SPEED = 8;
-const PROJECTILE_DAMAGE = 1;
-const PROJECTILE_LIFETIME = 60;
-const BASE_FIRE_COOLDOWN = 250;
 const ATTACK_ANIMATION_HOLD_MS = 600;
+const MAX_PROJECTILES_PER_SHOT = 9;
+const FALLBACK_PROJECTILE_DAMAGE = 1;
+
+function clamp(n: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, n));
+}
 
 let mouseX = 0;
 let mouseY = 0;
@@ -94,6 +99,9 @@ export function attackSystem(world: World, deltaMS: number) {
     homingStrength: 0,
   };
 
+  const weaponState = world.getComponent<WeaponState>(player, "WeaponState");
+  const weapon = getWeaponSpec(weaponState?.type ?? "bow");
+
   const targetX = mouseX + cameraX;
   const targetY = mouseY + cameraY;
   const dx = targetX - playerPos.x;
@@ -107,8 +115,20 @@ export function attackSystem(world: World, deltaMS: number) {
   const dirX = dx / length;
   const dirY = dy / length;
 
-  const projectileCount = Math.max(1, Math.floor(combatStats.multishot));
-  const spread = projectileCount > 1 ? 0.18 : 0;
+  const upgradeExtraShots = Math.max(0, Math.floor(combatStats.multishot) - 1);
+  const projectileCount = Math.min(
+    MAX_PROJECTILES_PER_SHOT,
+    Math.max(1, weapon.baseMultishot + upgradeExtraShots),
+  );
+  const spread =
+    projectileCount > 1 ? (weapon.spreadRad > 0 ? weapon.spreadRad : 0.18) : 0;
+
+  const damage = weapon.baseDamage + combatStats.damageBonus;
+  const homingStrength = clamp(
+    combatStats.homingStrength + weapon.homingBonus,
+    0,
+    0.35,
+  );
 
   for (let i = 0; i < projectileCount; i++) {
     const offset =
@@ -123,27 +143,38 @@ export function attackSystem(world: World, deltaMS: number) {
       y: playerPos.y,
     });
     world.addComponent<ProjectileStats>(projectile, "ProjectileStats", {
-      damage: PROJECTILE_DAMAGE + combatStats.damageBonus,
+      damage,
       critChance: combatStats.critChance,
       critMultiplier: combatStats.critMultiplier,
-      homingStrength: combatStats.homingStrength,
+      homingStrength,
     });
+    world.addComponent<ProjectileAppearance>(
+      projectile,
+      "ProjectileAppearance",
+      {
+        texture: weapon.projectileTexture,
+        tint: weapon.projectileTint,
+      },
+    );
     world.addComponent(projectile, "Velocity", {
       vx: rotatedX,
       vy: rotatedY,
-      speed: PROJECTILE_SPEED,
+      speed: weapon.projectileSpeed,
     });
     world.addComponent(projectile, "TimerComponent", {
-      timeLeft: PROJECTILE_LIFETIME,
+      timeLeft: weapon.projectileLifetimeFrames,
     });
     world.addComponent(projectile, "SpriteComponent", {
-      width: 24,
-      height: 24,
+      width: weapon.projectileSize,
+      height: weapon.projectileSize,
       anchor: 0.5,
     });
   }
 
-  attackCooldown = BASE_FIRE_COOLDOWN * combatStats.fireRateMultiplier;
+  attackCooldown = Math.max(
+    60,
+    weapon.baseCooldownMS * combatStats.fireRateMultiplier,
+  );
   attackAnimTimer = ATTACK_ANIMATION_HOLD_MS;
 }
 
@@ -229,7 +260,8 @@ export function projectileSystem(world: World) {
       const dist = Math.sqrt(dx * dx + dy * dy);
 
       if (dist < 25) {
-        const baseDamage = projectileStats?.damage ?? PROJECTILE_DAMAGE;
+        const baseDamage =
+          projectileStats?.damage ?? FALLBACK_PROJECTILE_DAMAGE;
         const crit =
           projectileStats && Math.random() < projectileStats.critChance;
         const damage = crit
@@ -250,7 +282,8 @@ export function projectileSystem(world: World) {
       const dist = Math.sqrt(dx * dx + dy * dy);
 
       if (dist < 50) {
-        const baseDamage = projectileStats?.damage ?? PROJECTILE_DAMAGE;
+        const baseDamage =
+          projectileStats?.damage ?? FALLBACK_PROJECTILE_DAMAGE;
         bossHealth.current -= baseDamage;
         world.destroyEntity(projectile);
         break;

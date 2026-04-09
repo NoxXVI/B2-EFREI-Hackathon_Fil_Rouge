@@ -7,6 +7,7 @@ import {
   LaserStats,
   FollowTarget,
   TimerComponent,
+  type ShieldState,
 } from "../components";
 import { AnimationSystem } from "./AnimationSystem";
 import { SpriteManifest } from "../components/Animation";
@@ -187,14 +188,17 @@ export function laserSystem(world: World, deltaMS: number) {
         player,
         "Invulnerable",
       );
+      const shield = world.getComponent<ShieldState>(player, "ShieldState");
       const isInvulnerable =
         !!playerInvulnerable && playerInvulnerable.timer > 0;
+      const isShielded = !!shield && shield.activeMS > 0;
 
       if (
         playerHealth &&
         !playerHealth.isDead &&
         !world.hasComponent(player, "DeadTag") &&
-        !isInvulnerable
+        !isInvulnerable &&
+        !isShielded
       ) {
         playerHealth.current -= laserStats.damage;
         world.addComponent(player, "Invulnerable", {

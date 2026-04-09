@@ -1,6 +1,9 @@
 import { World } from "../ecs/World";
 import { Position, Velocity } from "../components";
 
+const THROWER_MIN_DIST = 220;
+const THROWER_MAX_DIST = 360;
+
 /**
  * Fait en sorte que les entités avec "EnemyTag" se dirigent vers le joueur "PlayerTag"
  */
@@ -25,6 +28,21 @@ export function enemyFollowSystem(world: World) {
     // Calcul du vecteur de direction vers le joueur
     const dx = playerPos.x - enemyPos.x;
     const dy = playerPos.y - enemyPos.y;
+
+    if (world.hasComponent(enemy, "BombThrower")) {
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < THROWER_MIN_DIST) {
+        enemyVel.vx = -dx;
+        enemyVel.vy = -dy;
+      } else if (dist > THROWER_MAX_DIST) {
+        enemyVel.vx = dx;
+        enemyVel.vy = dy;
+      } else {
+        enemyVel.vx = 0;
+        enemyVel.vy = 0;
+      }
+      continue;
+    }
 
     // Normalisation basique (la normalisation finale sera faite dans le MovementSystem)
     // Ici on assigne juste la direction

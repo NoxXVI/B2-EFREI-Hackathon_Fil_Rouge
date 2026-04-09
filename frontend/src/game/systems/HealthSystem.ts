@@ -1,5 +1,11 @@
 import { World } from "../ecs/World";
-import { Position, Health, Invulnerable } from "../components";
+import {
+  Position,
+  Health,
+  Invulnerable,
+  type ShieldState,
+  type ContactDamage,
+} from "../components";
 import { grantEnemyXp } from "./PlayerProgressSystem";
 import { addLocalKills } from "./ScoreSystem";
 
@@ -27,17 +33,26 @@ export function healthSystem(world: World, deltaMS: number) {
       continue;
     }
 
+    const shield = world.getComponent<ShieldState>(player, "ShieldState");
+    if (shield && shield.activeMS > 0) {
+      continue;
+    }
+
     for (const enemy of enemies) {
       const enemyPos = world.getComponent<Position>(enemy, "Position")!;
       const enemyHealth = world.getComponent<Health>(enemy, "Health")!;
       if (enemyHealth.isDead || world.hasComponent(enemy, "DeadTag")) continue;
 
+      const contact = world.getComponent<ContactDamage>(enemy, "ContactDamage");
+      const radius = contact?.radius ?? COLLISION_RADIUS;
+      const damage = contact?.amount ?? PLAYER_DAMAGE;
+
       const dx = playerPos.x - enemyPos.x;
       const dy = playerPos.y - enemyPos.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
 
-      if (dist < COLLISION_RADIUS) {
-        health.current -= PLAYER_DAMAGE;
+      if (dist < radius) {
+        health.current -= damage;
         world.addComponent(player, "Invulnerable", {
           timer: INVULNERABILITY_DURATION,
           duration: INVULNERABILITY_DURATION,

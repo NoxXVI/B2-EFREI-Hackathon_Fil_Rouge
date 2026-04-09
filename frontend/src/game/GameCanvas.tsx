@@ -9,11 +9,25 @@ import {
   Ticker,
 } from "pixi.js";
 import { GameEngine } from "./GameEngine";
-import { type Health, type Position } from "./components";
+import {
+  type Bomb,
+  type DashState,
+  type ExplosionFx,
+  type Health,
+  type Position,
+  type ProjectileAppearance,
+  type ProjectileTextureKey,
+  type ShieldState,
+  type TimerComponent,
+  type WeaponState,
+} from "./components";
+import { SHIELD_DURATION_MS } from "./config/abilities";
+import { getWeaponSpec } from "./config/weapons";
 import { setCameraOffset } from "./systems/AttackSystem";
 import {
   getMapMeta,
   getMapThemeForLevel,
+  MAP_TILE_SIZE,
   type MapTheme,
 } from "./systems/MapData";
 import {
@@ -22,7 +36,13 @@ import {
   type UpgradeOption,
 } from "./systems/PlayerProgressSystem";
 import { consumePendingLocalKills } from "./systems/ScoreSystem";
-import { HudOverlay } from "./ui/HudOverlay";
+import {
+  HudOverlay,
+  type HudAbilities,
+  type HudMiniMapData,
+  type HudPickupRadar,
+  type HudRadarTarget,
+} from "./ui/HudOverlay";
 
 type LobbyPlayer = {
   id: string;
@@ -30,6 +50,8 @@ type LobbyPlayer = {
   color: number;
   kills: number;
 };
+
+type PickupRadarTarget = HudRadarTarget | null;
 
 const MAP_THEMES: MapTheme[] = [
   "forest",
@@ -90,6 +112,28 @@ function safeHexColor(hex: string): string {
   return cleaned.toLowerCase();
 }
 
+function directionLabelFromVector(dx: number, dy: number): string {
+  const angle = Math.atan2(-dy, dx); // y inverse pour une boussole "Nord"
+  const dirs = [
+    "Est",
+    "Nord-Est",
+    "Nord",
+    "Nord-Ouest",
+    "Ouest",
+    "Sud-Ouest",
+    "Sud",
+    "Sud-Est",
+  ] as const;
+
+  let idx = Math.round(angle / (Math.PI / 4));
+  idx = ((idx % 8) + 8) % 8;
+  return dirs[idx] ?? "—";
+}
+
+function angleFromNorthDeg(dx: number, dy: number): number {
+  return (Math.atan2(dx, -dy) * 180) / Math.PI;
+}
+
 interface GameCanvasProps {
   mode: "solo" | "multi";
   initialPlayerName?: string;
@@ -109,8 +153,16 @@ export const GameCanvas = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const spritesRef = useRef<Map<number, Sprite>>(new Map());
   const appRef = useRef<Application | null>(null);
-  const arrowTextureRef = useRef<Texture | null>(null);
-  const heartSpritesRef = useRef<Sprite[]>([]);
+  const projectileTexturesRef = useRef<
+    Record<ProjectileTextureKey, Texture | null>
+  >({
+    arrow: null,
+    arrow_01: null,
+    arrow_02: null,
+    arrow_03: null,
+  });
+  const healTextureRef = useRef<Texture | null>(null);
+  const shieldFxRef = useRef<Graphics | null>(null);
   const lastFrameAtRef = useRef(0);
   const laserContainerRef = useRef<Sprite | null>(null);
   const mouseXRef = useRef(400);
@@ -164,6 +216,49 @@ export const GameCanvas = ({
     xp: 0,
     xpToNext: 5,
     skillPoints: 0,
+  });
+  const [hudHealth, setHudHealth] = useState({ current: 3, max: 3 });
+  const [hudAbilities, setHudAbilities] = useState<HudAbilities>({
+    shieldActiveMS: 0,
+    shieldCooldownMS: 0,
+    dashActiveMS: 0,
+    dashCooldownMS: 0,
+  });
+  const hudAbilitiesRef = useRef<HudAbilities>({
+    shieldActiveMS: 0,
+    shieldCooldownMS: 0,
+    dashActiveMS: 0,
+    dashCooldownMS: 0,
+  });
+  const lastAbilitiesUpdateAtRef = useRef(0);
+  const [hudWeaponName, setHudWeaponName] = useState("Arc");
+  const hudWeaponNameRef = useRef("Arc");
+  const lastWeaponUpdateAtRef = useRef(0);
+  const [hudToast, setHudToast] = useState<string | null>(null);
+  const hudToastRef = useRef<string | null>(null);
+  const hudToastUntilRef = useRef(0);
+  const [hudPickupRadar, setHudPickupRadar] = useState<HudPickupRadar>({
+    heal: null,
+    power: null,
+  });
+  const hudPickupRadarRef = useRef<HudPickupRadar>({
+    heal: null,
+    power: null,
+  });
+  const lastRadarUpdateAtRef = useRef(0);
+  const [hudMiniMap, setHudMiniMap] = useState<HudMiniMapData>({
+    cols: 1,
+    rows: 1,
+    player: null,
+    heal: null,
+    power: null,
+  });
+  const hudMiniMapRef = useRef<HudMiniMapData>({
+    cols: 1,
+    rows: 1,
+    player: null,
+    heal: null,
+    power: null,
   });
 
   const openUpgradeMenu = () => {
@@ -490,12 +585,24 @@ export const GameCanvas = ({
 
   useEffect(() => {
     const init = async () => {
-      const arrowTex = await Assets.load("/assets/projectile/arrow.png");
-      arrowTex.baseTexture.scaleMode = SCALE_MODES.NEAREST;
-      arrowTextureRef.current = arrowTex;
+      const projectilePaths: Record<ProjectileTextureKey, string> = {
+        arrow: "/assets/projectile/arrow.png",
+        arrow_01: "/assets/projectile/arrow_01.png",
+        arrow_02: "/assets/projectile/arrow_02.png",
+        arrow_03: "/assets/projectile/arrow_03.png",
+      };
 
-      const heartTex = await Assets.load("/assets/heart.png");
-      heartTex.baseTexture.scaleMode = SCALE_MODES.NEAREST;
+      for (const key of Object.keys(
+        projectilePaths,
+      ) as ProjectileTextureKey[]) {
+        const tex = await Assets.load(projectilePaths[key]);
+        tex.baseTexture.scaleMode = SCALE_MODES.NEAREST;
+        projectileTexturesRef.current[key] = tex;
+      }
+
+      const healTex = await Assets.load("/assets/heart.png");
+      healTex.baseTexture.scaleMode = SCALE_MODES.NEAREST;
+      healTextureRef.current = healTex;
 
       const engine = new GameEngine();
       engineRef.current = engine;
@@ -543,21 +650,13 @@ export const GameCanvas = ({
       const spriteContainer = new Sprite();
       worldContainer.addChild(spriteContainer);
 
+      const shieldFx = new Graphics();
+      shieldFx.visible = false;
+      spriteContainer.addChild(shieldFx);
+      shieldFxRef.current = shieldFx;
+
       const bossContainer = new Sprite();
       worldContainer.addChild(bossContainer);
-
-      const heartsContainer = new Sprite();
-      app.stage.addChild(heartsContainer);
-
-      for (let i = 0; i < 3; i++) {
-        const heartSprite = new Sprite(heartTex);
-        heartSprite.anchor.set(0.5);
-        heartSprite.x = 40 + i * 60;
-        heartSprite.y = 40;
-        heartSprite.scale.set(1);
-        heartsContainer.addChild(heartSprite);
-        heartSpritesRef.current.push(heartSprite);
-      }
 
       await new Promise((resolve) => setTimeout(resolve, 500));
 
@@ -594,6 +693,22 @@ export const GameCanvas = ({
           !isApplyingMapRef.current
         ) {
           engine.update(ticker.deltaMS);
+        }
+
+        const now = lastFrameAtRef.current;
+        const notifications = engine.consumeNotifications();
+        if (notifications.length > 0) {
+          const message = notifications[notifications.length - 1] ?? "";
+          hudToastUntilRef.current = now + 4500;
+          if (hudToastRef.current !== message) {
+            hudToastRef.current = message;
+            setHudToast(message);
+          }
+        }
+
+        if (hudToastRef.current && now > hudToastUntilRef.current) {
+          hudToastRef.current = null;
+          setHudToast(null);
         }
 
         const progressEntity = engine.world.query([
@@ -679,16 +794,261 @@ export const GameCanvas = ({
             "Health",
           );
           if (playerHealth) {
-            for (let i = 0; i < heartSpritesRef.current.length; i++) {
-              heartSpritesRef.current[i].tint =
-                i < playerHealth.current ? 0xffffff : 0x888888;
-            }
+            setHudHealth((prev) => {
+              if (
+                prev.current === playerHealth.current &&
+                prev.max === playerHealth.max
+              ) {
+                return prev;
+              }
+              return { current: playerHealth.current, max: playerHealth.max };
+            });
           }
 
           const playerPos = engine.world.getComponent<Position>(
             localPlayer,
             "Position",
           )!;
+
+          const shieldFx = shieldFxRef.current;
+          if (shieldFx) {
+            const shield = engine.world.getComponent<ShieldState>(
+              localPlayer,
+              "ShieldState",
+            );
+            if (shield && shield.activeMS > 0) {
+              const t = Math.max(
+                0,
+                Math.min(1, shield.activeMS / SHIELD_DURATION_MS),
+              );
+              const pulse = 0.6 + 0.4 * Math.sin(lastFrameAtRef.current / 85);
+              const r = 58 + pulse * 3;
+
+              shieldFx.clear();
+              shieldFx.circle(0, 0, r);
+              shieldFx.fill(0x44ccff);
+              shieldFx.alpha = 0.06 + (1 - t) * 0.14;
+              shieldFx.visible = true;
+              shieldFx.position.set(playerPos.x, playerPos.y);
+
+              // Bring on top of sprites (so it reads like a bubble)
+              spriteContainer.addChild(shieldFx);
+            } else {
+              shieldFx.visible = false;
+            }
+          }
+
+          const abilitiesNow = lastFrameAtRef.current;
+          if (abilitiesNow - lastAbilitiesUpdateAtRef.current >= 120) {
+            lastAbilitiesUpdateAtRef.current = abilitiesNow;
+
+            const shield = engine.world.getComponent<ShieldState>(
+              localPlayer,
+              "ShieldState",
+            );
+            const dash = engine.world.getComponent<DashState>(
+              localPlayer,
+              "DashState",
+            );
+
+            const round = (ms: number) =>
+              Math.max(0, Math.round(ms / 100) * 100);
+            const next: HudAbilities = {
+              shieldActiveMS: round(shield?.activeMS ?? 0),
+              shieldCooldownMS: round(shield?.cooldownMS ?? 0),
+              dashActiveMS: round(dash?.activeMS ?? 0),
+              dashCooldownMS: round(dash?.cooldownMS ?? 0),
+            };
+
+            const prev = hudAbilitiesRef.current;
+            if (
+              prev.shieldActiveMS !== next.shieldActiveMS ||
+              prev.shieldCooldownMS !== next.shieldCooldownMS ||
+              prev.dashActiveMS !== next.dashActiveMS ||
+              prev.dashCooldownMS !== next.dashCooldownMS
+            ) {
+              hudAbilitiesRef.current = next;
+              setHudAbilities(next);
+            }
+          }
+
+          const weaponNow = lastFrameAtRef.current;
+          if (weaponNow - lastWeaponUpdateAtRef.current >= 200) {
+            lastWeaponUpdateAtRef.current = weaponNow;
+
+            const weapon = engine.world.getComponent<WeaponState>(
+              localPlayer,
+              "WeaponState",
+            );
+            const weaponName = getWeaponSpec(weapon?.type ?? "bow").name;
+            if (hudWeaponNameRef.current !== weaponName) {
+              hudWeaponNameRef.current = weaponName;
+              setHudWeaponName(weaponName);
+            }
+          }
+
+          const radarNow = lastFrameAtRef.current;
+          if (radarNow - lastRadarUpdateAtRef.current >= 160) {
+            lastRadarUpdateAtRef.current = radarNow;
+
+            const buildTarget = (
+              tag: "HealPickupTag" | "PowerPickupTag",
+            ): PickupRadarTarget => {
+              const targets = engine.world.query([tag, "Position"]);
+              if (targets.length === 0) return null;
+
+              let closest = targets[0];
+              let closestDistSq = Number.POSITIVE_INFINITY;
+
+              for (const target of targets) {
+                const targetPos = engine.world.getComponent<Position>(
+                  target,
+                  "Position",
+                );
+                if (!targetPos) continue;
+                const dx = targetPos.x - playerPos.x;
+                const dy = targetPos.y - playerPos.y;
+                const d = dx * dx + dy * dy;
+                if (d < closestDistSq) {
+                  closestDistSq = d;
+                  closest = target;
+                }
+              }
+
+              const targetPos = engine.world.getComponent<Position>(
+                closest,
+                "Position",
+              );
+              if (!targetPos) return null;
+
+              const dx = targetPos.x - playerPos.x;
+              const dy = targetPos.y - playerPos.y;
+              const distTiles = Math.max(
+                1,
+                Math.round(Math.sqrt(dx * dx + dy * dy) / MAP_TILE_SIZE),
+              );
+
+              return {
+                direction: directionLabelFromVector(dx, dy),
+                distanceTiles: distTiles,
+                angleDeg: angleFromNorthDeg(dx, dy),
+              };
+            };
+
+            const next: HudPickupRadar = {
+              heal: buildTarget("HealPickupTag"),
+              power: buildTarget("PowerPickupTag"),
+            };
+
+            const bounds = engine.tilemapSystem.bounds;
+            const cols = Math.max(1, Math.round(bounds.width / MAP_TILE_SIZE));
+            const rows = Math.max(1, Math.round(bounds.height / MAP_TILE_SIZE));
+            const playerTile = {
+              x: Math.max(
+                0,
+                Math.min(cols - 1, Math.floor(playerPos.x / MAP_TILE_SIZE)),
+              ),
+              y: Math.max(
+                0,
+                Math.min(rows - 1, Math.floor(playerPos.y / MAP_TILE_SIZE)),
+              ),
+            };
+
+            const healEntity = engine.world.query([
+              "HealPickupTag",
+              "Position",
+            ])[0];
+            const healPos =
+              healEntity !== undefined
+                ? engine.world.getComponent<Position>(healEntity, "Position")
+                : null;
+            const healTile = healPos
+              ? {
+                  x: Math.max(
+                    0,
+                    Math.min(cols - 1, Math.floor(healPos.x / MAP_TILE_SIZE)),
+                  ),
+                  y: Math.max(
+                    0,
+                    Math.min(rows - 1, Math.floor(healPos.y / MAP_TILE_SIZE)),
+                  ),
+                }
+              : null;
+
+            const powerEntity = engine.world.query([
+              "PowerPickupTag",
+              "Position",
+            ])[0];
+            const powerPos =
+              powerEntity !== undefined
+                ? engine.world.getComponent<Position>(powerEntity, "Position")
+                : null;
+            const powerTile = powerPos
+              ? {
+                  x: Math.max(
+                    0,
+                    Math.min(cols - 1, Math.floor(powerPos.x / MAP_TILE_SIZE)),
+                  ),
+                  y: Math.max(
+                    0,
+                    Math.min(rows - 1, Math.floor(powerPos.y / MAP_TILE_SIZE)),
+                  ),
+                }
+              : null;
+
+            const nextMiniMap: HudMiniMapData = {
+              cols,
+              rows,
+              player: playerTile,
+              heal: healTile,
+              power: powerTile,
+            };
+
+            const changed = (
+              prev: PickupRadarTarget,
+              next: PickupRadarTarget,
+            ) => {
+              if (!prev && !next) return false;
+              if (!prev || !next) return true;
+              const rawAngleDelta = Math.abs(prev.angleDeg - next.angleDeg);
+              const angleDelta = Math.min(rawAngleDelta, 360 - rawAngleDelta);
+              return (
+                prev.direction !== next.direction ||
+                prev.distanceTiles !== next.distanceTiles ||
+                angleDelta > 2.5
+              );
+            };
+
+            const prev = hudPickupRadarRef.current;
+            if (
+              changed(prev.heal, next.heal) ||
+              changed(prev.power, next.power)
+            ) {
+              hudPickupRadarRef.current = next;
+              setHudPickupRadar(next);
+            }
+
+            const prevMini = hudMiniMapRef.current;
+            const samePoint = (
+              a: { x: number; y: number } | null,
+              b: { x: number; y: number } | null,
+            ) => {
+              if (!a && !b) return true;
+              if (!a || !b) return false;
+              return a.x === b.x && a.y === b.y;
+            };
+
+            if (
+              prevMini.cols !== nextMiniMap.cols ||
+              prevMini.rows !== nextMiniMap.rows ||
+              !samePoint(prevMini.player, nextMiniMap.player) ||
+              !samePoint(prevMini.heal, nextMiniMap.heal) ||
+              !samePoint(prevMini.power, nextMiniMap.power)
+            ) {
+              hudMiniMapRef.current = nextMiniMap;
+              setHudMiniMap(nextMiniMap);
+            }
+          }
 
           // Camera clamped to map bounds so screen→world aiming stays correct.
           const mapW = engine.tilemapSystem.bounds.width;
@@ -705,6 +1065,51 @@ export const GameCanvas = ({
         } else {
           worldContainer.position.set(0, 0);
           setCameraOffset(0, 0);
+          if (shieldFxRef.current) {
+            shieldFxRef.current.visible = false;
+          }
+          if (
+            hudAbilitiesRef.current.shieldActiveMS !== 0 ||
+            hudAbilitiesRef.current.shieldCooldownMS !== 0 ||
+            hudAbilitiesRef.current.dashActiveMS !== 0 ||
+            hudAbilitiesRef.current.dashCooldownMS !== 0
+          ) {
+            const next: HudAbilities = {
+              shieldActiveMS: 0,
+              shieldCooldownMS: 0,
+              dashActiveMS: 0,
+              dashCooldownMS: 0,
+            };
+            hudAbilitiesRef.current = next;
+            setHudAbilities(next);
+          }
+          if (hudWeaponNameRef.current !== "Arc") {
+            hudWeaponNameRef.current = "Arc";
+            setHudWeaponName("Arc");
+          }
+          if (
+            hudPickupRadarRef.current.heal !== null ||
+            hudPickupRadarRef.current.power !== null
+          ) {
+            const next: HudPickupRadar = { heal: null, power: null };
+            hudPickupRadarRef.current = next;
+            setHudPickupRadar(next);
+          }
+          if (
+            hudMiniMapRef.current.player !== null ||
+            hudMiniMapRef.current.heal !== null ||
+            hudMiniMapRef.current.power !== null
+          ) {
+            const next: HudMiniMapData = {
+              cols: hudMiniMapRef.current.cols,
+              rows: hudMiniMapRef.current.rows,
+              player: null,
+              heal: null,
+              power: null,
+            };
+            hudMiniMapRef.current = next;
+            setHudMiniMap(next);
+          }
         }
 
         const entities = engine.world.query(["Position", "SpriteComponent"]);
@@ -726,15 +1131,87 @@ export const GameCanvas = ({
 
           if (!sprite) {
             // PROJECTILE
-            if (
-              engine.world.hasComponent(entityId, "ProjectileTag") &&
-              arrowTextureRef.current
+            if (engine.world.hasComponent(entityId, "ProjectileTag")) {
+              const appearance =
+                engine.world.getComponent<ProjectileAppearance>(
+                  entityId,
+                  "ProjectileAppearance",
+                );
+              const textureKey = appearance?.texture ?? "arrow";
+              const tex =
+                projectileTexturesRef.current[textureKey] ??
+                projectileTexturesRef.current.arrow;
+
+              if (tex) {
+                sprite = new Sprite(tex);
+                sprite.anchor.set(spriteComp.anchor);
+                sprite.width = spriteComp.width;
+                sprite.height = spriteComp.height;
+                if (appearance?.tint !== undefined) {
+                  sprite.tint = appearance.tint;
+                }
+
+                spriteContainer.addChild(sprite);
+                spritesRef.current.set(entityId, sprite);
+              }
+            }
+
+            // HEAL PICKUP
+            else if (
+              engine.world.hasComponent(entityId, "HealPickupTag") &&
+              healTextureRef.current
             ) {
-              sprite = new Sprite(arrowTextureRef.current);
+              sprite = new Sprite(healTextureRef.current);
               sprite.anchor.set(spriteComp.anchor);
+              sprite.width = spriteComp.width;
+              sprite.height = spriteComp.height;
 
               spriteContainer.addChild(sprite);
               spritesRef.current.set(entityId, sprite);
+            }
+
+            // POWER PICKUP
+            else if (engine.world.hasComponent(entityId, "PowerPickupTag")) {
+              const powerGraphics = new Graphics();
+              const r = Math.max(10, spriteComp.width / 2);
+
+              powerGraphics.circle(0, 0, r);
+              powerGraphics.fill(0x8f2dff);
+              powerGraphics.circle(0, 0, Math.max(2, r - 4));
+              powerGraphics.fill(0x2a123d);
+              powerGraphics.circle(0, 0, Math.max(2, r - 10));
+              powerGraphics.fill(0xffffff);
+
+              spriteContainer.addChild(powerGraphics);
+              spritesRef.current.set(
+                entityId,
+                powerGraphics as unknown as Sprite,
+              );
+              sprite = powerGraphics as unknown as Sprite;
+            }
+
+            // BOMB
+            else if (engine.world.hasComponent(entityId, "BombTag")) {
+              const bombContainer = new Sprite();
+              const warning = new Graphics();
+              const icon = new Graphics();
+              bombContainer.addChild(warning);
+              bombContainer.addChild(icon);
+
+              spriteContainer.addChild(bombContainer);
+              spritesRef.current.set(entityId, bombContainer);
+              sprite = bombContainer;
+            }
+
+            // EXPLOSION FX
+            else if (engine.world.hasComponent(entityId, "ExplosionFxTag")) {
+              const explosionGraphics = new Graphics();
+              spriteContainer.addChild(explosionGraphics);
+              spritesRef.current.set(
+                entityId,
+                explosionGraphics as unknown as Sprite,
+              );
+              sprite = explosionGraphics as unknown as Sprite;
             }
 
             // NORMAL / ANIMATION
@@ -807,6 +1284,54 @@ export const GameCanvas = ({
           if (sprite) {
             sprite.position.set(pos.x, pos.y);
 
+            if (engine.world.hasComponent(entityId, "BombTag")) {
+              const bomb = engine.world.getComponent<Bomb>(entityId, "Bomb");
+              const warning = sprite.children?.[0] as Graphics | undefined;
+              const icon = sprite.children?.[1] as Graphics | undefined;
+
+              if (bomb && warning && icon) {
+                const t = Math.max(0, Math.min(1, bomb.fuseMS / 1350));
+                const urgency = 1 - t;
+                const pulse =
+                  0.55 + 0.45 * Math.sin(lastFrameAtRef.current / 70);
+
+                warning.clear();
+                warning.circle(0, 0, bomb.radius);
+                warning.fill(0xff3b30);
+                warning.alpha = 0.05 + urgency * 0.16;
+
+                icon.clear();
+                icon.circle(0, 0, 10);
+                icon.fill(0x1a1a1a);
+                icon.circle(-3, -3, 3);
+                icon.fill(0xffffff);
+                icon.circle(3, 3, 2);
+                icon.fill(0xff3b30);
+                icon.alpha = 0.85 + pulse * 0.15;
+              }
+            } else if (engine.world.hasComponent(entityId, "ExplosionFxTag")) {
+              const fx = engine.world.getComponent<ExplosionFx>(
+                entityId,
+                "ExplosionFx",
+              );
+              const timer = engine.world.getComponent<TimerComponent>(
+                entityId,
+                "TimerComponent",
+              );
+              const gfx = sprite as unknown as Graphics;
+
+              if (fx && timer && gfx) {
+                const t = Math.max(0, Math.min(1, timer.timeLeft / 320));
+                const progress = 1 - t;
+                const r = Math.max(6, fx.radius * (0.3 + 0.7 * progress));
+
+                gfx.clear();
+                gfx.circle(0, 0, r);
+                gfx.fill(0xffd60a);
+                gfx.alpha = 0.22 * t;
+              }
+            }
+
             if (engine.world.hasComponent(entityId, "ProjectileTag")) {
               const vel = engine.world.getComponent<{
                 vx: number;
@@ -814,6 +1339,19 @@ export const GameCanvas = ({
               }>(entityId, "Velocity");
               if (vel) {
                 sprite.rotation = Math.atan2(vel.vy, vel.vx);
+              }
+
+              const appearance =
+                engine.world.getComponent<ProjectileAppearance>(
+                  entityId,
+                  "ProjectileAppearance",
+                );
+              if (
+                appearance &&
+                appearance.tint !== undefined &&
+                "tint" in sprite
+              ) {
+                sprite.tint = appearance.tint;
               }
             } else if (engine.world.hasComponent(entityId, "PlayerTag")) {
               const appearance = engine.world.getComponent<{ color: number }>(
@@ -899,7 +1437,7 @@ export const GameCanvas = ({
             if (sprite.parent) {
               sprite.parent.removeChild(sprite);
             }
-            sprite.destroy();
+            sprite.destroy({ children: true });
             spritesRef.current.delete(id);
           }
         }
@@ -954,7 +1492,13 @@ export const GameCanvas = ({
       />
       <HudOverlay
         progress={hudProgress}
+        health={hudHealth}
+        abilities={hudAbilities}
+        pickupRadar={hudPickupRadar}
+        miniMap={hudMiniMap}
+        weaponName={hudWeaponName}
         currentMapName={currentMapName}
+        toastMessage={hudToast}
         scoreboard={
           mpConnected && mpGameStarted
             ? mpPlayers.map((p) => ({
