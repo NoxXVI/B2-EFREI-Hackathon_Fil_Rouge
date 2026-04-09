@@ -1,39 +1,84 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Application,
-  Sprite,
-  Ticker,
-  SCALE_MODES,
   Assets,
-  Texture,
   Graphics,
+  SCALE_MODES,
+  Sprite,
+  Texture,
+  Ticker,
 } from "pixi.js";
 import { GameEngine } from "./GameEngine";
-import { Position, Health } from "./components";
+import {
+  type Bomb,
+  type DashState,
+  type ExplosionFx,
+  type Health,
+  type Position,
+  type ProjectileAppearance,
+  type ProjectileTextureKey,
+  type ShieldState,
+  type TimerComponent,
+  type WeaponState,
+} from "./components";
+import { SHIELD_DURATION_MS } from "./config/abilities";
+import { getWeaponSpec } from "./config/weapons";
+import { setCameraOffset } from "./systems/AttackSystem";
+import {
+  getMapMeta,
+  getMapThemeForLevel,
+  MAP_TILE_SIZE,
+  type MapTheme,
+} from "./systems/MapData";
 import {
   applyUpgrade,
   getUpgradeOptions,
   type UpgradeOption,
 } from "./systems/PlayerProgressSystem";
-import { HudOverlay } from "./ui/HudOverlay";
-import { setCameraOffset } from "./systems/AttackSystem";
-import {
-  getMapDisplayName,
-  getTargetMapIdForLevel,
-  type MapId,
-} from "./systems/MapData";
 import { consumePendingLocalKills } from "./systems/ScoreSystem";
+import {
+  HudOverlay,
+  type HudAbilities,
+  type HudMiniMapData,
+  type HudPickupRadar,
+  type HudRadarTarget,
+} from "./ui/HudOverlay";
 
-const MAP_IDS: MapId[] = [
-  "forest_1",
-  "forest_2",
-  "ice_1",
-  "dungeon_1",
-  "lava_1",
+type LobbyPlayer = {
+  id: string;
+  name: string;
+  color: number;
+  kills: number;
+};
+
+type PickupRadarTarget = HudRadarTarget | null;
+
+const MAP_THEMES: MapTheme[] = [
+  "forest",
+  "fairy_forest",
+  "dungeon",
+  "kings_hall",
+  "castle_courtyard",
+  "battlefield",
+  "rocky_lava",
+  "volcanic",
 ];
 
-function isMapId(value: unknown): value is MapId {
-  return typeof value === "string" && MAP_IDS.includes(value as MapId);
+function isMapTheme(value: unknown): value is MapTheme {
+  return typeof value === "string" && MAP_THEMES.includes(value as MapTheme);
+}
+
+const LEGACY_MAP_ID_TO_THEME: Record<string, MapTheme> = {
+  forest_1: "forest",
+  forest_2: "forest",
+  dungeon_1: "dungeon",
+  lava_1: "volcanic",
+};
+
+function coerceMapTheme(value: unknown): MapTheme | null {
+  if (typeof value !== "string") return null;
+  if (isMapTheme(value)) return value;
+  return LEGACY_MAP_ID_TO_THEME[value] ?? null;
 }
 
 function generateRoomId(): string {
@@ -67,6 +112,28 @@ function safeHexColor(hex: string): string {
   return cleaned.toLowerCase();
 }
 
+function directionLabelFromVector(dx: number, dy: number): string {
+  const angle = Math.atan2(-dy, dx); // y inverse pour une boussole "Nord"
+  const dirs = [
+    "Est",
+    "Nord-Est",
+    "Nord",
+    "Nord-Ouest",
+    "Ouest",
+    "Sud-Ouest",
+    "Sud",
+    "Sud-Est",
+  ] as const;
+
+  let idx = Math.round(angle / (Math.PI / 4));
+  idx = ((idx % 8) + 8) % 8;
+  return dirs[idx] ?? "—";
+}
+
+function angleFromNorthDeg(dx: number, dy: number): number {
+  return (Math.atan2(dx, -dy) * 180) / Math.PI;
+}
+
 interface GameCanvasProps {
   mode: "solo" | "multi";
   initialPlayerName?: string;
@@ -86,7 +153,16 @@ export const GameCanvas = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const spritesRef = useRef<Map<number, Sprite>>(new Map());
   const appRef = useRef<Application | null>(null);
-  const arrowTextureRef = useRef<Texture | null>(null);
+  const projectileTexturesRef = useRef<
+    Record<ProjectileTextureKey, Texture | null>
+  >({
+    arrow: null,
+    arrow_01: null,
+    arrow_02: null,
+    arrow_03: null,
+  });
+  const healTextureRef = useRef<Texture | null>(null);
+  const shieldFxRef = useRef<Graphics | null>(null);
   const lastFrameAtRef = useRef(0);
   const laserContainerRef = useRef<Sprite | null>(null);
   const mouseXRef = useRef(400);
@@ -98,16 +174,18 @@ export const GameCanvas = ({
   const mapChangeOpenRef = useRef(false);
   const isChangingMapRef = useRef(false);
   const isApplyingMapRef = useRef(false);
+  const currentMapThemeRef = useRef<MapTheme | null>(null);
+  const mapChangeRef = useRef<MapChangeState | null>(null);
 
   // Multiplayer (WS)
   const roomId = safeRoomId(roomIdProp ?? "default");
   const wsRef = useRef<WebSocket | null>(null);
   const youIdRef = useRef<string | null>(null);
+  const hostIdRef = useRef<string | null>(null);
   const mpConnectedRef = useRef(false);
   const mpGameStartedRef = useRef(false);
   const lastNetSendAtRef = useRef(0);
-  const lastMapRequestRef = useRef<MapId | null>(null);
-  const pendingMapIdRef = useRef<MapId | null>(null);
+  const lastMapRequestRef = useRef<MapTheme | null>(null);
 
   const [playerName] = useState(() => {
     if (initialPlayerName?.trim()) return initialPlayerName.trim();
@@ -121,25 +199,67 @@ export const GameCanvas = ({
       ? (localStorage.getItem("mp_color") ?? "#44ccff")
       : "#44ccff";
   });
+  const [mpPlayers, setMpPlayers] = useState<LobbyPlayer[]>([]);
   const [mpConnecting, setMpConnecting] = useState(false);
   const [mpConnected, setMpConnected] = useState(false);
+  const [mpYouId, setMpYouId] = useState<string | null>(null);
   const [mpGameStarted, setMpGameStarted] = useState(false);
 
   const [levelUpOpen, setLevelUpOpen] = useState(false);
   const [upgradeOptions, setUpgradeOptions] = useState<UpgradeOption[]>([]);
+  const [mapChangeOpen, setMapChangeOpen] = useState(false);
+  const [mapChange, setMapChange] = useState<MapChangeState | null>(null);
+  const [isChangingMap, setIsChangingMap] = useState(false);
+  const [currentMapName, setCurrentMapName] = useState("—");
   const [hudProgress, setHudProgress] = useState({
     level: 1,
     xp: 0,
     xpToNext: 5,
     skillPoints: 0,
   });
-  const [hudHealth, setHudHealth] = useState({
-    current: 3,
-    max: 3,
+  const [hudHealth, setHudHealth] = useState({ current: 3, max: 3 });
+  const [hudAbilities, setHudAbilities] = useState<HudAbilities>({
+    shieldActiveMS: 0,
+    shieldCooldownMS: 0,
+    dashActiveMS: 0,
+    dashCooldownMS: 0,
   });
-  const [mapChangeOpen, setMapChangeOpen] = useState(false);
-  const [pendingMapId, setPendingMapId] = useState<MapId | null>(null);
-  const [isChangingMap, setIsChangingMap] = useState(false);
+  const hudAbilitiesRef = useRef<HudAbilities>({
+    shieldActiveMS: 0,
+    shieldCooldownMS: 0,
+    dashActiveMS: 0,
+    dashCooldownMS: 0,
+  });
+  const lastAbilitiesUpdateAtRef = useRef(0);
+  const [hudWeaponName, setHudWeaponName] = useState("Arc");
+  const hudWeaponNameRef = useRef("Arc");
+  const lastWeaponUpdateAtRef = useRef(0);
+  const [hudToast, setHudToast] = useState<string | null>(null);
+  const hudToastRef = useRef<string | null>(null);
+  const hudToastUntilRef = useRef(0);
+  const [hudPickupRadar, setHudPickupRadar] = useState<HudPickupRadar>({
+    heal: null,
+    power: null,
+  });
+  const hudPickupRadarRef = useRef<HudPickupRadar>({
+    heal: null,
+    power: null,
+  });
+  const lastRadarUpdateAtRef = useRef(0);
+  const [hudMiniMap, setHudMiniMap] = useState<HudMiniMapData>({
+    cols: 1,
+    rows: 1,
+    player: null,
+    heal: null,
+    power: null,
+  });
+  const hudMiniMapRef = useRef<HudMiniMapData>({
+    cols: 1,
+    rows: 1,
+    player: null,
+    heal: null,
+    power: null,
+  });
 
   const openUpgradeMenu = () => {
     setUpgradeOptions(
@@ -151,60 +271,101 @@ export const GameCanvas = ({
     setLevelUpOpen(true);
   };
 
-  const openMapChangeMenu = (mapId: MapId) => {
-    setPendingMapId(mapId);
-    pendingMapIdRef.current = mapId;
+  const openMapChangeMenu = (theme: MapTheme, level: number) => {
+    const meta = getMapMeta(theme);
+    const next: MapChangeState = {
+      level,
+      theme,
+      name: meta.name,
+      description: meta.description,
+    };
+    mapChangeRef.current = next;
     mapChangeOpenRef.current = true;
+    setMapChange(next);
     setMapChangeOpen(true);
   };
 
   const closeMapChangeMenu = () => {
-    pendingMapIdRef.current = null;
+    mapChangeRef.current = null;
     mapChangeOpenRef.current = false;
     setMapChangeOpen(false);
-    setPendingMapId(null);
+    setMapChange(null);
   };
 
-  const resetMultiplayer = () => {
+  const resetMultiplayer = useCallback(() => {
     mpConnectedRef.current = false;
     mpGameStartedRef.current = false;
     youIdRef.current = null;
+    hostIdRef.current = null;
     wsRef.current = null;
     lastNetSendAtRef.current = 0;
     lastMapRequestRef.current = null;
 
+    if (engineRef.current) {
+      for (const id of engineRef.current.getRemotePlayerIds()) {
+        engineRef.current.removeRemotePlayer(id);
+      }
+    }
+
     setMpConnecting(false);
     setMpConnected(false);
+    setMpYouId(null);
     setMpGameStarted(false);
-  };
+    setMpPlayers([]);
+  }, []);
 
-  const sendWs = (payload: unknown) => {
+  const sendWs = useCallback((payload: unknown) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify(payload));
-  };
-
-  const applyMapChange = useCallback(async (mapId: MapId) => {
-    if (!engineRef.current) return;
-    if (!appRef.current) return;
-    if (engineRef.current.currentMap.id === mapId) return;
-    if (isApplyingMapRef.current) return;
-
-    isApplyingMapRef.current = true;
-    isChangingMapRef.current = true;
-    setIsChangingMap(true);
-
-    try {
-      await engineRef.current.changeMap(mapId);
-      appRef.current.renderer.background.color =
-        engineRef.current.currentMap.backgroundColor;
-    } finally {
-      isApplyingMapRef.current = false;
-      isChangingMapRef.current = false;
-      setIsChangingMap(false);
-      closeMapChangeMenu();
-    }
   }, []);
+
+  const getEngineLevel = useCallback(() => {
+    const engine = engineRef.current;
+    if (!engine) return 1;
+    const entity = engine.world.query(["ProgressionTag", "PlayerProgress"])[0];
+    if (entity === undefined) return 1;
+    const progress = engine.world.getComponent<{ level: number }>(
+      entity,
+      "PlayerProgress",
+    );
+    const level = progress?.level ?? 1;
+    return Number.isFinite(level) && level > 0 ? Math.floor(level) : 1;
+  }, []);
+
+  const applyMapChange = useCallback(
+    async (theme: MapTheme) => {
+      const engine = engineRef.current;
+      if (!engine) return;
+      if (engine.mapTheme === theme) {
+        currentMapThemeRef.current = engine.mapTheme;
+        setCurrentMapName(engine.mapInfo.name);
+        if (mapChangeRef.current?.theme === theme) {
+          closeMapChangeMenu();
+        }
+        isChangingMapRef.current = false;
+        setIsChangingMap(false);
+        return;
+      }
+      if (isApplyingMapRef.current) return;
+
+      isApplyingMapRef.current = true;
+      isChangingMapRef.current = true;
+      setIsChangingMap(true);
+
+      try {
+        await engine.changeMap(theme, getEngineLevel());
+        currentMapThemeRef.current = engine.mapTheme;
+        setCurrentMapName(engine.mapInfo.name);
+      } finally {
+        isApplyingMapRef.current = false;
+        isChangingMapRef.current = false;
+        setIsChangingMap(false);
+        closeMapChangeMenu();
+      }
+    },
+    [getEngineLevel],
+  );
 
   const connectMultiplayer = useCallback(() => {
     if (mpConnecting || mpConnected) return;
@@ -267,6 +428,7 @@ export const GameCanvas = ({
       if (msg.type !== "state") return;
 
       const nextYouId = typeof msg.youId === "string" ? msg.youId : null;
+      const nextHostId = typeof msg.hostId === "string" ? msg.hostId : null;
       const started = !!msg.gameStarted;
 
       if (nextYouId) {
@@ -275,20 +437,64 @@ export const GameCanvas = ({
         engineRef.current?.setLocalNetworkId(nextYouId);
       }
 
+      hostIdRef.current = nextHostId;
+
       mpGameStartedRef.current = started;
       setMpGameStarted(started);
 
-      const mapId = isMapId(msg.mapId) ? msg.mapId : null;
-      const pendingMapId = isMapId(msg.pendingMapId) ? msg.pendingMapId : null;
+      const incomingPlayers: LobbyPlayer[] = Array.isArray(msg.players)
+        ? msg.players
+            .filter(
+              (p: unknown) =>
+                !!p &&
+                typeof (p as { id?: unknown }).id === "string" &&
+                typeof (p as { name?: unknown }).name === "string" &&
+                typeof (p as { color?: unknown }).color === "number",
+            )
+            .map(
+              (p: {
+                id: string;
+                name: string;
+                color: number;
+                kills?: unknown;
+              }) => ({
+                id: p.id,
+                name: p.name,
+                color: p.color,
+                kills: typeof p.kills === "number" ? p.kills : 0,
+              }),
+            )
+        : [];
 
-      if (started && pendingMapId && !mapChangeOpenRef.current) {
-        openMapChangeMenu(pendingMapId);
+      incomingPlayers.sort((a, b) => a.id.localeCompare(b.id));
+      setMpPlayers((prev) => {
+        if (prev.length !== incomingPlayers.length) return incomingPlayers;
+        for (let i = 0; i < prev.length; i++) {
+          const a = prev[i];
+          const b = incomingPlayers[i];
+          if (
+            a.id !== b.id ||
+            a.name !== b.name ||
+            a.color !== b.color ||
+            a.kills !== b.kills
+          ) {
+            return incomingPlayers;
+          }
+        }
+        return prev;
+      });
+
+      const mapTheme = coerceMapTheme(msg.mapId);
+      const pendingMapTheme = coerceMapTheme(msg.pendingMapId);
+
+      if (started && pendingMapTheme && !mapChangeOpenRef.current) {
+        openMapChangeMenu(pendingMapTheme, 0);
         isChangingMapRef.current = false;
         setIsChangingMap(false);
       }
 
-      if (started && mapId) {
-        void applyMapChange(mapId);
+      if (started && mapTheme) {
+        void applyMapChange(mapTheme);
       }
 
       if (started && engineRef.current && Array.isArray(msg.players)) {
@@ -334,34 +540,36 @@ export const GameCanvas = ({
     mpConnecting,
     playerColor,
     playerName,
+    resetMultiplayer,
     roomId,
+    sendWs,
   ]);
 
-  const startMultiplayer = useCallback(() => {
-    sendWs({ type: "startGame" });
-  }, []);
-
   useEffect(() => {
-    const isMulti = mode === "multi";
-    if (isMulti) {
-      connectMultiplayer();
-    }
-    if (!isMulti) {
+    if (mode !== "multi") {
       wsRef.current?.close();
       resetMultiplayer();
+      return;
     }
-  }, [connectMultiplayer, mode]);
+    connectMultiplayer();
+  }, [connectMultiplayer, mode, resetMultiplayer]);
 
   useEffect(() => {
     if (mode !== "multi") return;
     if (!mpConnected) return;
     if (mpGameStarted) return;
-    startMultiplayer();
-  }, [mode, mpConnected, mpGameStarted, startMultiplayer]);
+    sendWs({ type: "startGame" });
+  }, [mode, mpConnected, mpGameStarted, sendWs]);
 
   useEffect(() => {
     onGameOverRef.current = onGameOver;
   }, [onGameOver]);
+
+  useEffect(() => {
+    return () => {
+      wsRef.current?.close();
+    };
+  }, []);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -377,23 +585,57 @@ export const GameCanvas = ({
 
   useEffect(() => {
     const init = async () => {
-      const arrowTex = await Assets.load("/assets/projectile/arrow.png");
-      arrowTex.baseTexture.scaleMode = SCALE_MODES.NEAREST;
-      arrowTextureRef.current = arrowTex;
+      const projectilePaths: Record<ProjectileTextureKey, string> = {
+        arrow: "/assets/projectile/arrow.png",
+        arrow_01: "/assets/projectile/arrow_01.png",
+        arrow_02: "/assets/projectile/arrow_02.png",
+        arrow_03: "/assets/projectile/arrow_03.png",
+      };
+
+      for (const key of Object.keys(
+        projectilePaths,
+      ) as ProjectileTextureKey[]) {
+        const tex = await Assets.load(projectilePaths[key]);
+        tex.baseTexture.scaleMode = SCALE_MODES.NEAREST;
+        projectileTexturesRef.current[key] = tex;
+      }
+
+      const healTex = await Assets.load("/assets/heart.png");
+      healTex.baseTexture.scaleMode = SCALE_MODES.NEAREST;
+      healTextureRef.current = healTex;
 
       const engine = new GameEngine();
       engineRef.current = engine;
+      currentMapThemeRef.current = engine.mapTheme;
+      setCurrentMapName(engine.mapInfo.name);
+
+      const name = playerName.trim() || "Player";
+      const colorNum = hexToColor(safeHexColor(playerColor));
+      engine.setLocalPlayerAppearance(name, colorNum);
+
       const app = new Application();
       appRef.current = app;
 
+      const initialW =
+        containerRef.current?.clientWidth ||
+        (typeof window !== "undefined" ? window.innerWidth : 800) ||
+        800;
+      const initialH =
+        containerRef.current?.clientHeight ||
+        (typeof window !== "undefined" ? window.innerHeight : 600) ||
+        600;
+
       await app.init({
-        width: 800,
-        height: 600,
+        width: initialW,
+        height: initialH,
         backgroundColor: 0x0a0a0f,
       });
 
       if (!containerRef.current) return;
       containerRef.current.appendChild(app.canvas);
+      app.canvas.style.display = "block";
+      app.canvas.style.width = "100%";
+      app.canvas.style.height = "100%";
 
       const worldContainer = new Sprite();
       app.stage.addChild(worldContainer);
@@ -408,6 +650,11 @@ export const GameCanvas = ({
       const spriteContainer = new Sprite();
       worldContainer.addChild(spriteContainer);
 
+      const shieldFx = new Graphics();
+      shieldFx.visible = false;
+      spriteContainer.addChild(shieldFx);
+      shieldFxRef.current = shieldFx;
+
       const bossContainer = new Sprite();
       worldContainer.addChild(bossContainer);
 
@@ -416,14 +663,52 @@ export const GameCanvas = ({
       const ticker = app.ticker ?? Ticker.shared;
       ticker.start();
 
+      const resizeToContainer = () => {
+        if (!appRef.current) return;
+        if (!containerRef.current) return;
+        const w = Math.floor(containerRef.current.clientWidth);
+        const h = Math.floor(containerRef.current.clientHeight);
+        if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
+          return;
+        }
+        appRef.current.renderer.resize(w, h);
+      };
+
+      resizeToContainer();
+      const ro =
+        typeof ResizeObserver !== "undefined"
+          ? new ResizeObserver(() => resizeToContainer())
+          : null;
+      ro?.observe(containerRef.current);
+
       const update = () => {
         if (!engineRef.current) return;
         lastFrameAtRef.current =
           typeof performance !== "undefined" ? performance.now() : Date.now();
         const engine = engineRef.current;
 
-        if (!levelUpOpenRef.current && !mapChangeOpenRef.current) {
+        if (
+          !levelUpOpenRef.current &&
+          !mapChangeOpenRef.current &&
+          !isApplyingMapRef.current
+        ) {
           engine.update(ticker.deltaMS);
+        }
+
+        const now = lastFrameAtRef.current;
+        const notifications = engine.consumeNotifications();
+        if (notifications.length > 0) {
+          const message = notifications[notifications.length - 1] ?? "";
+          hudToastUntilRef.current = now + 4500;
+          if (hudToastRef.current !== message) {
+            hudToastRef.current = message;
+            setHudToast(message);
+          }
+        }
+
+        if (hudToastRef.current && now > hudToastUntilRef.current) {
+          hudToastRef.current = null;
+          setHudToast(null);
         }
 
         const progressEntity = engine.world.query([
@@ -459,8 +744,11 @@ export const GameCanvas = ({
             const leveledUp = progress.level > lastLevelRef.current;
             if (leveledUp) lastLevelRef.current = progress.level;
 
-            const targetMapId = getTargetMapIdForLevel(progress.level);
-            const needsMapChange = targetMapId !== engine.currentMap.id;
+            // Changement de map aux paliers (5,10,20,25,35,40,50...)
+            const desiredTheme = getMapThemeForLevel(progress.level);
+            const currentTheme =
+              currentMapThemeRef.current ?? engine.mapTheme ?? "forest";
+            const needsMapChange = desiredTheme !== currentTheme;
 
             if (
               needsMapChange &&
@@ -468,15 +756,17 @@ export const GameCanvas = ({
               !isChangingMapRef.current
             ) {
               if (mpConnectedRef.current && mpGameStartedRef.current) {
-                if (lastMapRequestRef.current !== targetMapId) {
-                  lastMapRequestRef.current = targetMapId;
-                  sendWs({ type: "mapChangeRequest", mapId: targetMapId });
+                const youId = youIdRef.current;
+                const hostId = hostIdRef.current;
+                const isHost = !!youId && !!hostId && youId === hostId;
+                if (isHost && lastMapRequestRef.current !== desiredTheme) {
+                  lastMapRequestRef.current = desiredTheme;
+                  sendWs({ type: "mapChangeRequest", mapId: desiredTheme });
                 }
               } else {
-                openMapChangeMenu(targetMapId);
+                openMapChangeMenu(desiredTheme, progress.level);
               }
             } else if (progress.skillPoints > 0 && !levelUpOpenRef.current) {
-              // Normal level-up flow
               if (!mapChangeOpenRef.current) openUpgradeMenu();
             } else if (leveledUp && !levelUpOpenRef.current) {
               if (!mapChangeOpenRef.current) openUpgradeMenu();
@@ -484,23 +774,23 @@ export const GameCanvas = ({
           }
         }
 
-        let camX = 0;
-        let camY = 0;
-
-        const players = engine.world.query(["PlayerTag", "Health", "Position"]);
-        if (players.length > 0) {
+        const localPlayer = engine.getLocalPlayerEntity();
+        if (localPlayer !== null) {
           hasSpawnedPlayerRef.current = true;
         } else if (hasSpawnedPlayerRef.current && !gameOverSentRef.current) {
           gameOverSentRef.current = true;
           onGameOverRef.current?.();
         }
 
+        let camX = 0;
+        let camY = 0;
+
         if (
-          players.length > 0 &&
-          !engine.world.hasComponent(players[0], "DeadTag")
+          localPlayer !== null &&
+          !engine.world.hasComponent(localPlayer, "DeadTag")
         ) {
           const playerHealth = engine.world.getComponent<Health>(
-            players[0],
+            localPlayer,
             "Health",
           );
           if (playerHealth) {
@@ -511,32 +801,315 @@ export const GameCanvas = ({
               ) {
                 return prev;
               }
-
-              return {
-                current: playerHealth.current,
-                max: playerHealth.max,
-              };
+              return { current: playerHealth.current, max: playerHealth.max };
             });
           }
 
           const playerPos = engine.world.getComponent<Position>(
-            players[0],
+            localPlayer,
             "Position",
           )!;
+
+          const shieldFx = shieldFxRef.current;
+          if (shieldFx) {
+            const shield = engine.world.getComponent<ShieldState>(
+              localPlayer,
+              "ShieldState",
+            );
+            if (shield && shield.activeMS > 0) {
+              const t = Math.max(
+                0,
+                Math.min(1, shield.activeMS / SHIELD_DURATION_MS),
+              );
+              const pulse = 0.6 + 0.4 * Math.sin(lastFrameAtRef.current / 85);
+              const r = 58 + pulse * 3;
+
+              shieldFx.clear();
+              shieldFx.circle(0, 0, r);
+              shieldFx.fill(0x44ccff);
+              shieldFx.alpha = 0.06 + (1 - t) * 0.14;
+              shieldFx.visible = true;
+              shieldFx.position.set(playerPos.x, playerPos.y);
+
+              // Bring on top of sprites (so it reads like a bubble)
+              spriteContainer.addChild(shieldFx);
+            } else {
+              shieldFx.visible = false;
+            }
+          }
+
+          const abilitiesNow = lastFrameAtRef.current;
+          if (abilitiesNow - lastAbilitiesUpdateAtRef.current >= 120) {
+            lastAbilitiesUpdateAtRef.current = abilitiesNow;
+
+            const shield = engine.world.getComponent<ShieldState>(
+              localPlayer,
+              "ShieldState",
+            );
+            const dash = engine.world.getComponent<DashState>(
+              localPlayer,
+              "DashState",
+            );
+
+            const round = (ms: number) =>
+              Math.max(0, Math.round(ms / 100) * 100);
+            const next: HudAbilities = {
+              shieldActiveMS: round(shield?.activeMS ?? 0),
+              shieldCooldownMS: round(shield?.cooldownMS ?? 0),
+              dashActiveMS: round(dash?.activeMS ?? 0),
+              dashCooldownMS: round(dash?.cooldownMS ?? 0),
+            };
+
+            const prev = hudAbilitiesRef.current;
+            if (
+              prev.shieldActiveMS !== next.shieldActiveMS ||
+              prev.shieldCooldownMS !== next.shieldCooldownMS ||
+              prev.dashActiveMS !== next.dashActiveMS ||
+              prev.dashCooldownMS !== next.dashCooldownMS
+            ) {
+              hudAbilitiesRef.current = next;
+              setHudAbilities(next);
+            }
+          }
+
+          const weaponNow = lastFrameAtRef.current;
+          if (weaponNow - lastWeaponUpdateAtRef.current >= 200) {
+            lastWeaponUpdateAtRef.current = weaponNow;
+
+            const weapon = engine.world.getComponent<WeaponState>(
+              localPlayer,
+              "WeaponState",
+            );
+            const weaponName = getWeaponSpec(weapon?.type ?? "bow").name;
+            if (hudWeaponNameRef.current !== weaponName) {
+              hudWeaponNameRef.current = weaponName;
+              setHudWeaponName(weaponName);
+            }
+          }
+
+          const radarNow = lastFrameAtRef.current;
+          if (radarNow - lastRadarUpdateAtRef.current >= 160) {
+            lastRadarUpdateAtRef.current = radarNow;
+
+            const buildTarget = (
+              tag: "HealPickupTag" | "PowerPickupTag",
+            ): PickupRadarTarget => {
+              const targets = engine.world.query([tag, "Position"]);
+              if (targets.length === 0) return null;
+
+              let closest = targets[0];
+              let closestDistSq = Number.POSITIVE_INFINITY;
+
+              for (const target of targets) {
+                const targetPos = engine.world.getComponent<Position>(
+                  target,
+                  "Position",
+                );
+                if (!targetPos) continue;
+                const dx = targetPos.x - playerPos.x;
+                const dy = targetPos.y - playerPos.y;
+                const d = dx * dx + dy * dy;
+                if (d < closestDistSq) {
+                  closestDistSq = d;
+                  closest = target;
+                }
+              }
+
+              const targetPos = engine.world.getComponent<Position>(
+                closest,
+                "Position",
+              );
+              if (!targetPos) return null;
+
+              const dx = targetPos.x - playerPos.x;
+              const dy = targetPos.y - playerPos.y;
+              const distTiles = Math.max(
+                1,
+                Math.round(Math.sqrt(dx * dx + dy * dy) / MAP_TILE_SIZE),
+              );
+
+              return {
+                direction: directionLabelFromVector(dx, dy),
+                distanceTiles: distTiles,
+                angleDeg: angleFromNorthDeg(dx, dy),
+              };
+            };
+
+            const next: HudPickupRadar = {
+              heal: buildTarget("HealPickupTag"),
+              power: buildTarget("PowerPickupTag"),
+            };
+
+            const bounds = engine.tilemapSystem.bounds;
+            const cols = Math.max(1, Math.round(bounds.width / MAP_TILE_SIZE));
+            const rows = Math.max(1, Math.round(bounds.height / MAP_TILE_SIZE));
+            const playerTile = {
+              x: Math.max(
+                0,
+                Math.min(cols - 1, Math.floor(playerPos.x / MAP_TILE_SIZE)),
+              ),
+              y: Math.max(
+                0,
+                Math.min(rows - 1, Math.floor(playerPos.y / MAP_TILE_SIZE)),
+              ),
+            };
+
+            const healEntity = engine.world.query([
+              "HealPickupTag",
+              "Position",
+            ])[0];
+            const healPos =
+              healEntity !== undefined
+                ? engine.world.getComponent<Position>(healEntity, "Position")
+                : null;
+            const healTile = healPos
+              ? {
+                  x: Math.max(
+                    0,
+                    Math.min(cols - 1, Math.floor(healPos.x / MAP_TILE_SIZE)),
+                  ),
+                  y: Math.max(
+                    0,
+                    Math.min(rows - 1, Math.floor(healPos.y / MAP_TILE_SIZE)),
+                  ),
+                }
+              : null;
+
+            const powerEntity = engine.world.query([
+              "PowerPickupTag",
+              "Position",
+            ])[0];
+            const powerPos =
+              powerEntity !== undefined
+                ? engine.world.getComponent<Position>(powerEntity, "Position")
+                : null;
+            const powerTile = powerPos
+              ? {
+                  x: Math.max(
+                    0,
+                    Math.min(cols - 1, Math.floor(powerPos.x / MAP_TILE_SIZE)),
+                  ),
+                  y: Math.max(
+                    0,
+                    Math.min(rows - 1, Math.floor(powerPos.y / MAP_TILE_SIZE)),
+                  ),
+                }
+              : null;
+
+            const nextMiniMap: HudMiniMapData = {
+              cols,
+              rows,
+              player: playerTile,
+              heal: healTile,
+              power: powerTile,
+            };
+
+            const changed = (
+              prev: PickupRadarTarget,
+              next: PickupRadarTarget,
+            ) => {
+              if (!prev && !next) return false;
+              if (!prev || !next) return true;
+              const rawAngleDelta = Math.abs(prev.angleDeg - next.angleDeg);
+              const angleDelta = Math.min(rawAngleDelta, 360 - rawAngleDelta);
+              return (
+                prev.direction !== next.direction ||
+                prev.distanceTiles !== next.distanceTiles ||
+                angleDelta > 2.5
+              );
+            };
+
+            const prev = hudPickupRadarRef.current;
+            if (
+              changed(prev.heal, next.heal) ||
+              changed(prev.power, next.power)
+            ) {
+              hudPickupRadarRef.current = next;
+              setHudPickupRadar(next);
+            }
+
+            const prevMini = hudMiniMapRef.current;
+            const samePoint = (
+              a: { x: number; y: number } | null,
+              b: { x: number; y: number } | null,
+            ) => {
+              if (!a && !b) return true;
+              if (!a || !b) return false;
+              return a.x === b.x && a.y === b.y;
+            };
+
+            if (
+              prevMini.cols !== nextMiniMap.cols ||
+              prevMini.rows !== nextMiniMap.rows ||
+              !samePoint(prevMini.player, nextMiniMap.player) ||
+              !samePoint(prevMini.heal, nextMiniMap.heal) ||
+              !samePoint(prevMini.power, nextMiniMap.power)
+            ) {
+              hudMiniMapRef.current = nextMiniMap;
+              setHudMiniMap(nextMiniMap);
+            }
+          }
 
           // Camera clamped to map bounds so screen→world aiming stays correct.
           const mapW = engine.tilemapSystem.bounds.width;
           const mapH = engine.tilemapSystem.bounds.height;
-          const maxCamX = Math.max(0, mapW - 800);
-          const maxCamY = Math.max(0, mapH - 600);
-          camX = Math.max(0, Math.min(playerPos.x - 400, maxCamX));
-          camY = Math.max(0, Math.min(playerPos.y - 300, maxCamY));
+          const viewW = appRef.current?.screen.width ?? 800;
+          const viewH = appRef.current?.screen.height ?? 600;
+          const maxCamX = Math.max(0, mapW - viewW);
+          const maxCamY = Math.max(0, mapH - viewH);
+          camX = Math.max(0, Math.min(playerPos.x - viewW / 2, maxCamX));
+          camY = Math.max(0, Math.min(playerPos.y - viewH / 2, maxCamY));
 
           worldContainer.position.set(-camX, -camY);
           setCameraOffset(camX, camY);
         } else {
           worldContainer.position.set(0, 0);
           setCameraOffset(0, 0);
+          if (shieldFxRef.current) {
+            shieldFxRef.current.visible = false;
+          }
+          if (
+            hudAbilitiesRef.current.shieldActiveMS !== 0 ||
+            hudAbilitiesRef.current.shieldCooldownMS !== 0 ||
+            hudAbilitiesRef.current.dashActiveMS !== 0 ||
+            hudAbilitiesRef.current.dashCooldownMS !== 0
+          ) {
+            const next: HudAbilities = {
+              shieldActiveMS: 0,
+              shieldCooldownMS: 0,
+              dashActiveMS: 0,
+              dashCooldownMS: 0,
+            };
+            hudAbilitiesRef.current = next;
+            setHudAbilities(next);
+          }
+          if (hudWeaponNameRef.current !== "Arc") {
+            hudWeaponNameRef.current = "Arc";
+            setHudWeaponName("Arc");
+          }
+          if (
+            hudPickupRadarRef.current.heal !== null ||
+            hudPickupRadarRef.current.power !== null
+          ) {
+            const next: HudPickupRadar = { heal: null, power: null };
+            hudPickupRadarRef.current = next;
+            setHudPickupRadar(next);
+          }
+          if (
+            hudMiniMapRef.current.player !== null ||
+            hudMiniMapRef.current.heal !== null ||
+            hudMiniMapRef.current.power !== null
+          ) {
+            const next: HudMiniMapData = {
+              cols: hudMiniMapRef.current.cols,
+              rows: hudMiniMapRef.current.rows,
+              player: null,
+              heal: null,
+              power: null,
+            };
+            hudMiniMapRef.current = next;
+            setHudMiniMap(next);
+          }
         }
 
         const entities = engine.world.query(["Position", "SpriteComponent"]);
@@ -558,15 +1131,87 @@ export const GameCanvas = ({
 
           if (!sprite) {
             // PROJECTILE
-            if (
-              engine.world.hasComponent(entityId, "ProjectileTag") &&
-              arrowTextureRef.current
+            if (engine.world.hasComponent(entityId, "ProjectileTag")) {
+              const appearance =
+                engine.world.getComponent<ProjectileAppearance>(
+                  entityId,
+                  "ProjectileAppearance",
+                );
+              const textureKey = appearance?.texture ?? "arrow";
+              const tex =
+                projectileTexturesRef.current[textureKey] ??
+                projectileTexturesRef.current.arrow;
+
+              if (tex) {
+                sprite = new Sprite(tex);
+                sprite.anchor.set(spriteComp.anchor);
+                sprite.width = spriteComp.width;
+                sprite.height = spriteComp.height;
+                if (appearance?.tint !== undefined) {
+                  sprite.tint = appearance.tint;
+                }
+
+                spriteContainer.addChild(sprite);
+                spritesRef.current.set(entityId, sprite);
+              }
+            }
+
+            // HEAL PICKUP
+            else if (
+              engine.world.hasComponent(entityId, "HealPickupTag") &&
+              healTextureRef.current
             ) {
-              sprite = new Sprite(arrowTextureRef.current);
+              sprite = new Sprite(healTextureRef.current);
               sprite.anchor.set(spriteComp.anchor);
+              sprite.width = spriteComp.width;
+              sprite.height = spriteComp.height;
 
               spriteContainer.addChild(sprite);
               spritesRef.current.set(entityId, sprite);
+            }
+
+            // POWER PICKUP
+            else if (engine.world.hasComponent(entityId, "PowerPickupTag")) {
+              const powerGraphics = new Graphics();
+              const r = Math.max(10, spriteComp.width / 2);
+
+              powerGraphics.circle(0, 0, r);
+              powerGraphics.fill(0x8f2dff);
+              powerGraphics.circle(0, 0, Math.max(2, r - 4));
+              powerGraphics.fill(0x2a123d);
+              powerGraphics.circle(0, 0, Math.max(2, r - 10));
+              powerGraphics.fill(0xffffff);
+
+              spriteContainer.addChild(powerGraphics);
+              spritesRef.current.set(
+                entityId,
+                powerGraphics as unknown as Sprite,
+              );
+              sprite = powerGraphics as unknown as Sprite;
+            }
+
+            // BOMB
+            else if (engine.world.hasComponent(entityId, "BombTag")) {
+              const bombContainer = new Sprite();
+              const warning = new Graphics();
+              const icon = new Graphics();
+              bombContainer.addChild(warning);
+              bombContainer.addChild(icon);
+
+              spriteContainer.addChild(bombContainer);
+              spritesRef.current.set(entityId, bombContainer);
+              sprite = bombContainer;
+            }
+
+            // EXPLOSION FX
+            else if (engine.world.hasComponent(entityId, "ExplosionFxTag")) {
+              const explosionGraphics = new Graphics();
+              spriteContainer.addChild(explosionGraphics);
+              spritesRef.current.set(
+                entityId,
+                explosionGraphics as unknown as Sprite,
+              );
+              sprite = explosionGraphics as unknown as Sprite;
             }
 
             // NORMAL / ANIMATION
@@ -639,12 +1284,52 @@ export const GameCanvas = ({
           if (sprite) {
             sprite.position.set(pos.x, pos.y);
 
-            const appearance = engine.world.getComponent<{ color: number }>(
-              entityId,
-              "PlayerAppearance",
-            );
-            if (appearance) {
-              sprite.tint = appearance.color;
+            if (engine.world.hasComponent(entityId, "BombTag")) {
+              const bomb = engine.world.getComponent<Bomb>(entityId, "Bomb");
+              const warning = sprite.children?.[0] as Graphics | undefined;
+              const icon = sprite.children?.[1] as Graphics | undefined;
+
+              if (bomb && warning && icon) {
+                const t = Math.max(0, Math.min(1, bomb.fuseMS / 1350));
+                const urgency = 1 - t;
+                const pulse =
+                  0.55 + 0.45 * Math.sin(lastFrameAtRef.current / 70);
+
+                warning.clear();
+                warning.circle(0, 0, bomb.radius);
+                warning.fill(0xff3b30);
+                warning.alpha = 0.05 + urgency * 0.16;
+
+                icon.clear();
+                icon.circle(0, 0, 10);
+                icon.fill(0x1a1a1a);
+                icon.circle(-3, -3, 3);
+                icon.fill(0xffffff);
+                icon.circle(3, 3, 2);
+                icon.fill(0xff3b30);
+                icon.alpha = 0.85 + pulse * 0.15;
+              }
+            } else if (engine.world.hasComponent(entityId, "ExplosionFxTag")) {
+              const fx = engine.world.getComponent<ExplosionFx>(
+                entityId,
+                "ExplosionFx",
+              );
+              const timer = engine.world.getComponent<TimerComponent>(
+                entityId,
+                "TimerComponent",
+              );
+              const gfx = sprite as unknown as Graphics;
+
+              if (fx && timer && gfx) {
+                const t = Math.max(0, Math.min(1, timer.timeLeft / 320));
+                const progress = 1 - t;
+                const r = Math.max(6, fx.radius * (0.3 + 0.7 * progress));
+
+                gfx.clear();
+                gfx.circle(0, 0, r);
+                gfx.fill(0xffd60a);
+                gfx.alpha = 0.22 * t;
+              }
             }
 
             if (engine.world.hasComponent(entityId, "ProjectileTag")) {
@@ -655,7 +1340,28 @@ export const GameCanvas = ({
               if (vel) {
                 sprite.rotation = Math.atan2(vel.vy, vel.vx);
               }
+
+              const appearance =
+                engine.world.getComponent<ProjectileAppearance>(
+                  entityId,
+                  "ProjectileAppearance",
+                );
+              if (
+                appearance &&
+                appearance.tint !== undefined &&
+                "tint" in sprite
+              ) {
+                sprite.tint = appearance.tint;
+              }
             } else if (engine.world.hasComponent(entityId, "PlayerTag")) {
+              const appearance = engine.world.getComponent<{ color: number }>(
+                entityId,
+                "PlayerAppearance",
+              );
+              if (appearance) {
+                sprite.tint = appearance.color;
+              }
+
               const isLocal = engine.world.hasComponent(
                 entityId,
                 "LocalPlayerTag",
@@ -731,7 +1437,7 @@ export const GameCanvas = ({
             if (sprite.parent) {
               sprite.parent.removeChild(sprite);
             }
-            sprite.destroy();
+            sprite.destroy({ children: true });
             spritesRef.current.delete(id);
           }
         }
@@ -757,6 +1463,7 @@ export const GameCanvas = ({
       }, 100);
 
       return () => {
+        ro?.disconnect();
         window.clearInterval(fallbackInterval);
         ticker.remove(update);
       };
@@ -774,46 +1481,53 @@ export const GameCanvas = ({
         appRef.current.destroy(true);
       }
     };
-  }, []);
+  }, [playerColor, playerName, sendWs]);
 
   return (
-    <div style={{ position: "relative", width: "800px", height: "600px" }}>
-      <div id="pixi-container" ref={containerRef} />
+    <div style={{ position: "relative", width: "100%", height: "100%" }}>
+      <div
+        id="pixi-container"
+        ref={containerRef}
+        style={{ width: "100%", height: "100%" }}
+      />
       <HudOverlay
         progress={hudProgress}
         health={hudHealth}
+        abilities={hudAbilities}
+        pickupRadar={hudPickupRadar}
+        miniMap={hudMiniMap}
+        weaponName={hudWeaponName}
+        currentMapName={currentMapName}
+        toastMessage={hudToast}
+        scoreboard={
+          mpConnected && mpGameStarted
+            ? mpPlayers.map((p) => ({
+                id: p.id,
+                name: p.name,
+                color: p.color,
+                kills: p.kills,
+                isYou: !!mpYouId && p.id === mpYouId,
+              }))
+            : undefined
+        }
         levelUpOpen={levelUpOpen}
         upgradeOptions={upgradeOptions}
         mapChangeOpen={mapChangeOpen}
-        pendingMapName={pendingMapId ? getMapDisplayName(pendingMapId) : ""}
+        mapChangeInfo={mapChange}
         isChangingMap={isChangingMap}
         onConfirmMapChange={async () => {
           if (!engineRef.current) return;
-          if (!pendingMapId) return;
+          const change = mapChangeRef.current;
+          if (!change) return;
 
           if (mpConnectedRef.current && mpGameStartedRef.current) {
             isChangingMapRef.current = true;
             setIsChangingMap(true);
-            sendWs({ type: "mapChangeConfirm", mapId: pendingMapId });
+            sendWs({ type: "mapChangeConfirm", mapId: change.theme });
             return;
           }
 
-          isChangingMapRef.current = true;
-          setIsChangingMap(true);
-
-          try {
-            await engineRef.current.changeMap(pendingMapId);
-
-            if (appRef.current) {
-              appRef.current.renderer.background.color =
-                engineRef.current.currentMap.backgroundColor;
-            }
-          } finally {
-            isChangingMapRef.current = false;
-            setIsChangingMap(false);
-          }
-
-          closeMapChangeMenu();
+          await applyMapChange(change.theme);
 
           // Après changement de map, si des points de skill sont dispo, on ouvre l'upgrade menu.
           const progressEntity = engineRef.current.world.query([
@@ -855,3 +1569,10 @@ export const GameCanvas = ({
     </div>
   );
 };
+
+interface MapChangeState {
+  level: number;
+  theme: MapTheme;
+  name: string;
+  description: string;
+}

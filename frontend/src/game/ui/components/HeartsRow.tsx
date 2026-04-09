@@ -10,7 +10,7 @@ export const HeartsRow = ({ current, max }: HeartsRowProps) => {
   const safeCurrent = Math.max(0, Math.min(current, safeMax));
 
   return (
-    <XStack gap="$1" alignItems="center" flexWrap="wrap">
+    <XStack gap="$1" items="center" flexWrap="wrap">
       {Array.from({ length: safeMax }).map((_, index) => {
         const active = index < safeCurrent;
 

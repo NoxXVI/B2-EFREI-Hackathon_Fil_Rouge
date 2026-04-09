@@ -43,7 +43,13 @@ export const HomeScreen = ({ onPlaySolo, onPlayMulti }: HomeScreenProps) => {
   const [helpModalOpen, setHelpModalOpen] = useState(false);
   const [playerName, setPlayerName] = useState("Player");
   const [playerColor, setPlayerColor] = useState("#44ccff");
-  const [roomId, setRoomId] = useState(() => generateRoomId());
+  const [roomId, setRoomId] = useState(() => {
+    if (typeof window !== "undefined") {
+      const param = new URL(window.location.href).searchParams.get("room");
+      if (param) return normalizeRoomId(param);
+    }
+    return generateRoomId();
+  });
 
   const inviteLink =
     typeof window === "undefined"
@@ -372,7 +378,7 @@ export const HomeScreen = ({ onPlaySolo, onPlayMulti }: HomeScreenProps) => {
                   fontSize: 28,
                 }}
               />
-              <XStack alignItems="center" gap="$2">
+              <XStack items="center" gap="$2">
                 <Input
                   value={inviteLink}
                   readOnly
@@ -418,7 +424,7 @@ export const HomeScreen = ({ onPlaySolo, onPlayMulti }: HomeScreenProps) => {
               >
                 Couleur
               </Text>
-              <XStack alignItems="center" gap="$3">
+              <XStack items="center" gap="$3">
                 <input
                   type="color"
                   value={normalizeHexColor(playerColor)}

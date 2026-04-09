@@ -11,11 +11,17 @@ import { Position } from "../components";
 import {
   MAP_TILE_SIZE,
   TILE_EMPTY,
-  TILE_FLOOR,
+  TILE_WALL,
+  TILE_CARPET,
   TILE_TREE,
   TILE_BUSH,
-  type MapBiome,
-  type MapData,
+  TILE_PILLAR,
+  TILE_STATUE,
+  TILE_LAVA,
+  TILE_RUBBLE,
+  isWalkableTile,
+  type GeneratedMap,
+  type MapTheme,
 } from "./MapData";
 
 const TS = MAP_TILE_SIZE;
@@ -49,82 +55,32 @@ function seededRand01(x: number, y: number, seed: number): number {
   return h / 0xffffffff;
 }
 
-type BiomeTextureSet = {
-  floor: Texture[];
-  wall: Texture[];
-  wallTop: Texture[];
-  decor: null | {
-    primary: Texture[];
-    secondary: Texture[];
-    primaryChance: number;
-    secondaryChance: number;
-    seed: number;
-  };
-};
-
-const BIOME_TINTS: Record<
-  MapBiome,
-  { floor: number; wall: number; wallTop: number; tree: number; bush: number }
-> = {
-  forest: {
-    floor: 0xffffff,
-    wall: 0xffffff,
-    wallTop: 0xffffff,
-    tree: 0xffffff,
-    bush: 0xffffff,
-  },
-  ice: {
-    floor: 0xe6f7ff,
-    wall: 0xc4ecff,
-    wallTop: 0xe6f7ff,
-    tree: 0xd7fbff,
-    bush: 0xf5fdff,
-  },
-  dungeon: {
-    floor: 0xdedede,
-    wall: 0xffffff,
-    wallTop: 0xffffff,
-    tree: 0xffffff,
-    bush: 0xffffff,
-  },
-  lava: {
-    floor: 0xffe0d5,
-    wall: 0xffc8b2,
-    wallTop: 0xffe0d5,
-    tree: 0xffbdb0,
-    bush: 0xffb08f,
-  },
-};
-
 export class TilemapSystem {
   public container: Container;
+  private atlasLoaded = false;
   private atlasTexture: Texture | null = null;
-  private atlasAttempted = false;
-  private wallRects: [number, number, number, number][] = [];
+  private readonly atlasTileCache = new Map<string, Texture>();
+  private readonly themeTextureCache = new Map<MapTheme, ThemeTextures>();
+
   private cols = 0;
   private rows = 0;
-  private tileSize = TS;
-  private biomeTextureCache = new Map<MapBiome, BiomeTextureSet>();
+  private wallRects: [number, number, number, number][] = [];
 
   constructor() {
     this.container = new Container();
   }
 
-  async build(mapData: MapData) {
-    await this.setMap(mapData);
-  }
+  private async ensureAtlasLoaded() {
+    if (this.atlasLoaded) return;
+    this.atlasLoaded = true;
 
-  private async ensureAtlasTexture() {
-    if (this.atlasAttempted) return;
-    this.atlasAttempted = true;
-
+    // Charge le tileset (optionnel : fallback si asset absent)
     try {
       this.atlasTexture = (await Assets.load(
         "/assets/full_tilemap.png",
       )) as Texture;
       this.atlasTexture.source.scaleMode = SCALE_MODES.NEAREST;
     } catch (err) {
-      this.atlasTexture = null;
       console.warn(
         '[TilemapSystem] Unable to load "/assets/full_tilemap.png" — using fallback tiles.',
         err,
@@ -132,707 +88,28 @@ export class TilemapSystem {
     }
   }
 
-  private getBiomeTextures(
-    biome: MapBiome,
-    createTileTexture: (
-      draw: (ctx: CanvasRenderingContext2D) => void,
-    ) => Texture,
-  ): BiomeTextureSet {
-    const cached = this.biomeTextureCache.get(biome);
-    if (cached) return cached;
-
-    const makeForest = (): BiomeTextureSet => {
-      const floor = [
-        createTileTexture((ctx) => {
-          ctx.fillStyle = "#2f7a3a";
-          ctx.fillRect(0, 0, TS, TS);
-          for (let py = 0; py < TS; py++) {
-            for (let px = 0; px < TS; px++) {
-              const r = seededRand01(px, py, 1);
-              if (r < 0.06) {
-                ctx.fillStyle = "#256530";
-                ctx.fillRect(px, py, 1, 1);
-              } else if (r > 0.94) {
-                ctx.fillStyle = "#3e8a46";
-                ctx.fillRect(px, py, 1, 1);
-              }
-            }
-          }
-          for (let i = 0; i < 4; i++) {
-            const fx = Math.floor(seededRand01(i, 0, 17) * TS);
-            const fy = Math.floor(seededRand01(i, 1, 17) * TS);
-            ctx.fillStyle = i % 2 === 0 ? "#e6d15e" : "#e86aa1";
-            ctx.fillRect(fx, fy, 1, 1);
-          }
-        }),
-        createTileTexture((ctx) => {
-          ctx.fillStyle = "#2d7637";
-          ctx.fillRect(0, 0, TS, TS);
-          for (let py = 0; py < TS; py++) {
-            for (let px = 0; px < TS; px++) {
-              const r = seededRand01(px, py, 2);
-              if (r < 0.08) {
-                ctx.fillStyle = "#245f2e";
-                ctx.fillRect(px, py, 1, 1);
-              } else if (r > 0.96) {
-                ctx.fillStyle = "#4a9151";
-                ctx.fillRect(px, py, 1, 1);
-              }
-            }
-          }
-        }),
-        createTileTexture((ctx) => {
-          ctx.fillStyle = "#2f7a3a";
-          ctx.fillRect(0, 0, TS, TS);
-          ctx.fillStyle = "#6b4f2a";
-          ctx.fillRect(5, 6, 6, 5);
-          ctx.fillStyle = "#5a4122";
-          ctx.fillRect(6, 7, 4, 3);
-          for (let py = 0; py < TS; py++) {
-            for (let px = 0; px < TS; px++) {
-              const r = seededRand01(px, py, 3);
-              if (r < 0.04) {
-                ctx.fillStyle = "#256530";
-                ctx.fillRect(px, py, 1, 1);
-              }
-            }
-          }
-        }),
-      ];
-
-      const wall = [
-        // rocher
-        createTileTexture((ctx) => {
-          ctx.fillStyle = "#6d727a";
-          ctx.fillRect(0, 0, TS, TS);
-          for (let py = 0; py < TS; py++) {
-            for (let px = 0; px < TS; px++) {
-              const r = seededRand01(px, py, 11);
-              if (r < 0.08) {
-                ctx.fillStyle = "#575c63";
-                ctx.fillRect(px, py, 1, 1);
-              } else if (r > 0.93) {
-                ctx.fillStyle = "#878d96";
-                ctx.fillRect(px, py, 1, 1);
-              }
-            }
-          }
-          ctx.fillStyle = "rgba(0,0,0,0.18)";
-          ctx.fillRect(0, 12, TS, 4);
-        }),
-        // arbre (canopée dense)
-        createTileTexture((ctx) => {
-          ctx.fillStyle = "#204b26";
-          ctx.fillRect(0, 0, TS, TS);
-          for (let py = 0; py < TS; py++) {
-            for (let px = 0; px < TS; px++) {
-              const r = seededRand01(px, py, 12);
-              if (r < 0.08) {
-                ctx.fillStyle = "#193a1e";
-                ctx.fillRect(px, py, 1, 1);
-              } else if (r > 0.95) {
-                ctx.fillStyle = "#2a602f";
-                ctx.fillRect(px, py, 1, 1);
-              }
-            }
-          }
-          ctx.fillStyle = "#6a4a26";
-          ctx.fillRect(7, 7, 2, 3);
-        }),
-        // buisson / ronces
-        createTileTexture((ctx) => {
-          ctx.fillStyle = "#1f4a25";
-          ctx.fillRect(0, 0, TS, TS);
-          for (let py = 0; py < TS; py++) {
-            for (let px = 0; px < TS; px++) {
-              const r = seededRand01(px, py, 13);
-              if (r < 0.1) {
-                ctx.fillStyle = "#17361b";
-                ctx.fillRect(px, py, 1, 1);
-              } else if (r > 0.92) {
-                ctx.fillStyle = "#2f6a34";
-                ctx.fillRect(px, py, 1, 1);
-              }
-            }
-          }
-        }),
-      ];
-
-      const wallTop = [
-        // rocher (haut plus clair)
-        createTileTexture((ctx) => {
-          ctx.fillStyle = "#6d727a";
-          ctx.fillRect(0, 0, TS, TS);
-          for (let py = 0; py < TS; py++) {
-            for (let px = 0; px < TS; px++) {
-              const r = seededRand01(px, py, 11);
-              if (r < 0.08) {
-                ctx.fillStyle = "#575c63";
-                ctx.fillRect(px, py, 1, 1);
-              } else if (r > 0.93) {
-                ctx.fillStyle = "#878d96";
-                ctx.fillRect(px, py, 1, 1);
-              }
-            }
-          }
-          ctx.fillStyle = "rgba(255,255,255,0.1)";
-          ctx.fillRect(0, 0, TS, 3);
-          ctx.fillStyle = "rgba(0,0,0,0.18)";
-          ctx.fillRect(0, 12, TS, 4);
-        }),
-        // arbre (liseré clair en haut)
-        createTileTexture((ctx) => {
-          ctx.fillStyle = "#204b26";
-          ctx.fillRect(0, 0, TS, TS);
-          for (let py = 0; py < TS; py++) {
-            for (let px = 0; px < TS; px++) {
-              const r = seededRand01(px, py, 12);
-              if (r < 0.08) {
-                ctx.fillStyle = "#193a1e";
-                ctx.fillRect(px, py, 1, 1);
-              } else if (r > 0.95) {
-                ctx.fillStyle = "#2a602f";
-                ctx.fillRect(px, py, 1, 1);
-              }
-            }
-          }
-          ctx.fillStyle = "#6a4a26";
-          ctx.fillRect(7, 7, 2, 3);
-          ctx.fillStyle = "rgba(255,255,255,0.08)";
-          ctx.fillRect(0, 0, TS, 3);
-        }),
-        // buisson (haut plus clair)
-        createTileTexture((ctx) => {
-          ctx.fillStyle = "#1f4a25";
-          ctx.fillRect(0, 0, TS, TS);
-          for (let py = 0; py < TS; py++) {
-            for (let px = 0; px < TS; px++) {
-              const r = seededRand01(px, py, 13);
-              if (r < 0.1) {
-                ctx.fillStyle = "#17361b";
-                ctx.fillRect(px, py, 1, 1);
-              } else if (r > 0.92) {
-                ctx.fillStyle = "#2f6a34";
-                ctx.fillRect(px, py, 1, 1);
-              }
-            }
-          }
-          ctx.fillStyle = "rgba(255,255,255,0.08)";
-          ctx.fillRect(0, 0, TS, 3);
-        }),
-      ];
-
-      const decorPrimary = [
-        createTileTexture((ctx) => {
-          ctx.clearRect(0, 0, TS, TS);
-          const cx = 8;
-          const cy = 8;
-          const r = 7;
-          for (let py = 0; py < TS; py++) {
-            for (let px = 0; px < TS; px++) {
-              const dx = px - cx;
-              const dy = py - cy;
-              const dist = Math.sqrt(dx * dx + dy * dy);
-              if (dist <= r) {
-                const n = seededRand01(px, py, 31);
-                if (n < 0.08) ctx.fillStyle = "#17361b";
-                else if (n > 0.92) ctx.fillStyle = "#2a602f";
-                else ctx.fillStyle = "#204b26";
-                ctx.fillRect(px, py, 1, 1);
-              }
-            }
-          }
-          ctx.fillStyle = "#6a4a26";
-          ctx.fillRect(7, 9, 2, 3);
-        }),
-      ];
-
-      const decorSecondary = [
-        createTileTexture((ctx) => {
-          ctx.clearRect(0, 0, TS, TS);
-          ctx.fillStyle = "#7b8088";
-          ctx.fillRect(4, 7, 8, 5);
-          ctx.fillStyle = "#666b73";
-          ctx.fillRect(5, 8, 6, 3);
-          ctx.fillStyle = "#8f959e";
-          ctx.fillRect(6, 8, 2, 1);
-          ctx.fillRect(9, 9, 1, 1);
-        }),
-      ];
-
-      return {
-        floor,
-        wall,
-        wallTop,
-        decor: {
-          primary: decorPrimary,
-          secondary: decorSecondary,
-          primaryChance: 0.025,
-          secondaryChance: 0.045,
-          seed: 99,
-        },
-      };
-    };
-
-    const makeIce = (): BiomeTextureSet => {
-      const floor = [
-        createTileTexture((ctx) => {
-          ctx.fillStyle = "#bfe8ff";
-          ctx.fillRect(0, 0, TS, TS);
-          for (let py = 0; py < TS; py++) {
-            for (let px = 0; px < TS; px++) {
-              const r = seededRand01(px, py, 41);
-              if (r < 0.08) {
-                ctx.fillStyle = "#a8ddff";
-                ctx.fillRect(px, py, 1, 1);
-              } else if (r > 0.95) {
-                ctx.fillStyle = "#d7f4ff";
-                ctx.fillRect(px, py, 1, 1);
-              }
-            }
-          }
-        }),
-        createTileTexture((ctx) => {
-          ctx.fillStyle = "#cfefff";
-          ctx.fillRect(0, 0, TS, TS);
-          // petites stries
-          ctx.fillStyle = "rgba(255,255,255,0.18)";
-          ctx.fillRect(0, 2, TS, 1);
-          ctx.fillRect(0, 9, TS, 1);
-          ctx.fillStyle = "rgba(0,0,0,0.08)";
-          ctx.fillRect(0, 12, TS, 1);
-        }),
-      ];
-
-      const wall = [
-        // ice boulder
-        createTileTexture((ctx) => {
-          ctx.fillStyle = "#94b9cc";
-          ctx.fillRect(0, 0, TS, TS);
-          for (let py = 0; py < TS; py++) {
-            for (let px = 0; px < TS; px++) {
-              const r = seededRand01(px, py, 51);
-              if (r < 0.08) {
-                ctx.fillStyle = "#7fa9c0";
-                ctx.fillRect(px, py, 1, 1);
-              } else if (r > 0.94) {
-                ctx.fillStyle = "#b8d6e6";
-                ctx.fillRect(px, py, 1, 1);
-              }
-            }
-          }
-          ctx.fillStyle = "rgba(0,0,0,0.12)";
-          ctx.fillRect(0, 12, TS, 4);
-        }),
-        // ice pillar
-        createTileTexture((ctx) => {
-          ctx.fillStyle = "#6ad1ff";
-          ctx.fillRect(0, 0, TS, TS);
-          ctx.fillStyle = "rgba(255,255,255,0.35)";
-          ctx.fillRect(2, 0, 2, TS);
-          ctx.fillRect(9, 0, 1, TS);
-          ctx.fillStyle = "rgba(0,0,0,0.12)";
-          ctx.fillRect(0, 12, TS, 4);
-        }),
-        // snow bank
-        createTileTexture((ctx) => {
-          ctx.fillStyle = "#eaf8ff";
-          ctx.fillRect(0, 0, TS, TS);
-          for (let py = 0; py < TS; py++) {
-            for (let px = 0; px < TS; px++) {
-              const r = seededRand01(px, py, 53);
-              if (r < 0.08) {
-                ctx.fillStyle = "#d7f2ff";
-                ctx.fillRect(px, py, 1, 1);
-              }
-            }
-          }
-          ctx.fillStyle = "rgba(0,0,0,0.08)";
-          ctx.fillRect(0, 12, TS, 4);
-        }),
-      ];
-
-      const wallTop = [
-        // ice boulder top
-        createTileTexture((ctx) => {
-          ctx.fillStyle = "#94b9cc";
-          ctx.fillRect(0, 0, TS, TS);
-          ctx.fillStyle = "rgba(255,255,255,0.22)";
-          ctx.fillRect(0, 0, TS, 3);
-          ctx.fillStyle = "rgba(0,0,0,0.12)";
-          ctx.fillRect(0, 12, TS, 4);
-        }),
-        // pillar top
-        createTileTexture((ctx) => {
-          ctx.fillStyle = "#6ad1ff";
-          ctx.fillRect(0, 0, TS, TS);
-          ctx.fillStyle = "rgba(255,255,255,0.35)";
-          ctx.fillRect(0, 0, TS, 3);
-          ctx.fillStyle = "rgba(0,0,0,0.12)";
-          ctx.fillRect(0, 12, TS, 4);
-        }),
-        // snow top
-        createTileTexture((ctx) => {
-          ctx.fillStyle = "#eaf8ff";
-          ctx.fillRect(0, 0, TS, TS);
-          ctx.fillStyle = "rgba(255,255,255,0.35)";
-          ctx.fillRect(0, 0, TS, 3);
-          ctx.fillStyle = "rgba(0,0,0,0.08)";
-          ctx.fillRect(0, 12, TS, 4);
-        }),
-      ];
-
-      const decorPrimary = [
-        createTileTexture((ctx) => {
-          ctx.clearRect(0, 0, TS, TS);
-          ctx.fillStyle = "rgba(160,240,255,0.95)";
-          ctx.fillRect(8, 4, 1, 8);
-          ctx.fillRect(6, 7, 1, 5);
-          ctx.fillStyle = "rgba(255,255,255,0.85)";
-          ctx.fillRect(9, 5, 1, 6);
-        }),
-      ];
-
-      const decorSecondary = [
-        createTileTexture((ctx) => {
-          ctx.clearRect(0, 0, TS, TS);
-          ctx.fillStyle = "#9fb3bf";
-          ctx.fillRect(5, 9, 6, 3);
-          ctx.fillStyle = "rgba(255,255,255,0.25)";
-          ctx.fillRect(6, 9, 2, 1);
-        }),
-      ];
-
-      return {
-        floor,
-        wall,
-        wallTop,
-        decor: {
-          primary: decorPrimary,
-          secondary: decorSecondary,
-          primaryChance: 0.02,
-          secondaryChance: 0.035,
-          seed: 199,
-        },
-      };
-    };
-
-    const makeDungeon = (): BiomeTextureSet => {
-      const floor = [
-        createTileTexture((ctx) => {
-          ctx.fillStyle = "#34353b";
-          ctx.fillRect(0, 0, TS, TS);
-          for (let py = 0; py < TS; py++) {
-            for (let px = 0; px < TS; px++) {
-              const r = seededRand01(px, py, 61);
-              if (r < 0.07) {
-                ctx.fillStyle = "#2a2b30";
-                ctx.fillRect(px, py, 1, 1);
-              } else if (r > 0.96) {
-                ctx.fillStyle = "#44464d";
-                ctx.fillRect(px, py, 1, 1);
-              }
-            }
-          }
-          ctx.fillStyle = "rgba(0,0,0,0.18)";
-          ctx.fillRect(0, 12, TS, 1);
-        }),
-        createTileTexture((ctx) => {
-          ctx.fillStyle = "#3b3c44";
-          ctx.fillRect(0, 0, TS, TS);
-          ctx.fillStyle = "rgba(0,0,0,0.25)";
-          ctx.fillRect(0, 0, TS, 1);
-          ctx.fillRect(0, 8, TS, 1);
-        }),
-      ];
-
-      const wall = [
-        // bricks
-        createTileTexture((ctx) => {
-          ctx.fillStyle = "#565864";
-          ctx.fillRect(0, 0, TS, TS);
-          ctx.fillStyle = "rgba(0,0,0,0.25)";
-          for (let y = 4; y < TS; y += 4) ctx.fillRect(0, y, TS, 1);
-          ctx.fillRect(0, 0, 1, TS);
-          ctx.fillRect(8, 0, 1, TS);
-        }),
-        // pillar
-        createTileTexture((ctx) => {
-          ctx.fillStyle = "#6a6c78";
-          ctx.fillRect(0, 0, TS, TS);
-          ctx.fillStyle = "rgba(255,255,255,0.18)";
-          ctx.fillRect(2, 0, 2, TS);
-          ctx.fillStyle = "rgba(0,0,0,0.22)";
-          ctx.fillRect(0, 12, TS, 4);
-        }),
-        // debris
-        createTileTexture((ctx) => {
-          ctx.fillStyle = "#4c4e57";
-          ctx.fillRect(0, 0, TS, TS);
-          for (let i = 0; i < 10; i++) {
-            const x = Math.floor(seededRand01(i, 0, 77) * TS);
-            const y = Math.floor(seededRand01(i, 1, 77) * TS);
-            ctx.fillStyle = "rgba(0,0,0,0.25)";
-            ctx.fillRect(x, y, 1, 1);
-          }
-          ctx.fillStyle = "rgba(0,0,0,0.22)";
-          ctx.fillRect(0, 12, TS, 4);
-        }),
-      ];
-
-      const wallTop = [
-        createTileTexture((ctx) => {
-          ctx.fillStyle = "#565864";
-          ctx.fillRect(0, 0, TS, TS);
-          ctx.fillStyle = "rgba(255,255,255,0.08)";
-          ctx.fillRect(0, 0, TS, 3);
-          ctx.fillStyle = "rgba(0,0,0,0.25)";
-          for (let y = 4; y < TS; y += 4) ctx.fillRect(0, y, TS, 1);
-        }),
-        createTileTexture((ctx) => {
-          ctx.fillStyle = "#6a6c78";
-          ctx.fillRect(0, 0, TS, TS);
-          ctx.fillStyle = "rgba(255,255,255,0.2)";
-          ctx.fillRect(0, 0, TS, 3);
-          ctx.fillStyle = "rgba(0,0,0,0.22)";
-          ctx.fillRect(0, 12, TS, 4);
-        }),
-        createTileTexture((ctx) => {
-          ctx.fillStyle = "#4c4e57";
-          ctx.fillRect(0, 0, TS, TS);
-          ctx.fillStyle = "rgba(255,255,255,0.1)";
-          ctx.fillRect(0, 0, TS, 3);
-          ctx.fillStyle = "rgba(0,0,0,0.22)";
-          ctx.fillRect(0, 12, TS, 4);
-        }),
-      ];
-
-      const decorPrimary = [
-        createTileTexture((ctx) => {
-          ctx.clearRect(0, 0, TS, TS);
-          ctx.fillStyle = "rgba(0,0,0,0.35)";
-          ctx.fillRect(2, 10, 12, 1);
-          ctx.fillRect(6, 6, 1, 6);
-          ctx.fillStyle = "rgba(255,255,255,0.12)";
-          ctx.fillRect(7, 6, 1, 3);
-        }),
-      ];
-
-      const decorSecondary = [
-        createTileTexture((ctx) => {
-          ctx.clearRect(0, 0, TS, TS);
-          ctx.fillStyle = "rgba(0,0,0,0.22)";
-          ctx.fillRect(4, 11, 2, 2);
-          ctx.fillRect(10, 9, 2, 2);
-        }),
-      ];
-
-      return {
-        floor,
-        wall,
-        wallTop,
-        decor: {
-          primary: decorPrimary,
-          secondary: decorSecondary,
-          primaryChance: 0.03,
-          secondaryChance: 0.055,
-          seed: 299,
-        },
-      };
-    };
-
-    const makeLava = (): BiomeTextureSet => {
-      const floor = [
-        createTileTexture((ctx) => {
-          ctx.fillStyle = "#2c2326";
-          ctx.fillRect(0, 0, TS, TS);
-          for (let py = 0; py < TS; py++) {
-            for (let px = 0; px < TS; px++) {
-              const r = seededRand01(px, py, 71);
-              if (r < 0.06) {
-                ctx.fillStyle = "#1f1a1c";
-                ctx.fillRect(px, py, 1, 1);
-              } else if (r > 0.965) {
-                ctx.fillStyle = "#ff7a1a";
-                ctx.fillRect(px, py, 1, 1);
-              }
-            }
-          }
-        }),
-        createTileTexture((ctx) => {
-          ctx.fillStyle = "#2a2023";
-          ctx.fillRect(0, 0, TS, TS);
-          ctx.fillStyle = "rgba(255,122,26,0.35)";
-          ctx.fillRect(0, 6, TS, 1);
-          ctx.fillRect(0, 12, TS, 1);
-        }),
-      ];
-
-      const wall = [
-        // basalt
-        createTileTexture((ctx) => {
-          ctx.fillStyle = "#3a2f33";
-          ctx.fillRect(0, 0, TS, TS);
-          for (let py = 0; py < TS; py++) {
-            for (let px = 0; px < TS; px++) {
-              const r = seededRand01(px, py, 81);
-              if (r < 0.07) {
-                ctx.fillStyle = "#2b2427";
-                ctx.fillRect(px, py, 1, 1);
-              } else if (r > 0.96) {
-                ctx.fillStyle = "#54454b";
-                ctx.fillRect(px, py, 1, 1);
-              }
-            }
-          }
-          ctx.fillStyle = "rgba(0,0,0,0.22)";
-          ctx.fillRect(0, 12, TS, 4);
-        }),
-        // obsidian spire
-        createTileTexture((ctx) => {
-          ctx.fillStyle = "#1c1b1f";
-          ctx.fillRect(0, 0, TS, TS);
-          ctx.fillStyle = "rgba(160,120,255,0.18)";
-          ctx.fillRect(3, 0, 1, TS);
-          ctx.fillRect(10, 0, 1, TS);
-          ctx.fillStyle = "rgba(0,0,0,0.22)";
-          ctx.fillRect(0, 12, TS, 4);
-        }),
-        // magma rock
-        createTileTexture((ctx) => {
-          ctx.fillStyle = "#4a2a28";
-          ctx.fillRect(0, 0, TS, TS);
-          ctx.fillStyle = "rgba(255,122,26,0.25)";
-          ctx.fillRect(0, 0, TS, 2);
-          for (let i = 0; i < 7; i++) {
-            const x = Math.floor(seededRand01(i, 0, 88) * TS);
-            const y = 6 + Math.floor(seededRand01(i, 1, 88) * 8);
-            ctx.fillRect(x, y, 1, 1);
-          }
-          ctx.fillStyle = "rgba(0,0,0,0.22)";
-          ctx.fillRect(0, 12, TS, 4);
-        }),
-      ];
-
-      const wallTop = [
-        createTileTexture((ctx) => {
-          ctx.fillStyle = "#3a2f33";
-          ctx.fillRect(0, 0, TS, TS);
-          ctx.fillStyle = "rgba(255,255,255,0.08)";
-          ctx.fillRect(0, 0, TS, 3);
-          ctx.fillStyle = "rgba(0,0,0,0.22)";
-          ctx.fillRect(0, 12, TS, 4);
-        }),
-        createTileTexture((ctx) => {
-          ctx.fillStyle = "#1c1b1f";
-          ctx.fillRect(0, 0, TS, TS);
-          ctx.fillStyle = "rgba(255,122,26,0.25)";
-          ctx.fillRect(0, 0, TS, 2);
-          ctx.fillStyle = "rgba(0,0,0,0.22)";
-          ctx.fillRect(0, 12, TS, 4);
-        }),
-        createTileTexture((ctx) => {
-          ctx.fillStyle = "#4a2a28";
-          ctx.fillRect(0, 0, TS, TS);
-          ctx.fillStyle = "rgba(255,122,26,0.25)";
-          ctx.fillRect(0, 0, TS, 3);
-          ctx.fillStyle = "rgba(0,0,0,0.22)";
-          ctx.fillRect(0, 12, TS, 4);
-        }),
-      ];
-
-      const decorPrimary = [
-        createTileTexture((ctx) => {
-          ctx.clearRect(0, 0, TS, TS);
-          ctx.fillStyle = "rgba(255,122,26,0.9)";
-          ctx.fillRect(8, 10, 2, 2);
-          ctx.fillRect(4, 12, 1, 1);
-          ctx.fillStyle = "rgba(255,220,170,0.8)";
-          ctx.fillRect(9, 10, 1, 1);
-        }),
-      ];
-
-      const decorSecondary = [
-        createTileTexture((ctx) => {
-          ctx.clearRect(0, 0, TS, TS);
-          ctx.fillStyle = "rgba(0,0,0,0.28)";
-          ctx.fillRect(6, 10, 4, 2);
-          ctx.fillStyle = "rgba(255,122,26,0.25)";
-          ctx.fillRect(7, 10, 1, 1);
-        }),
-      ];
-
-      return {
-        floor,
-        wall,
-        wallTop,
-        decor: {
-          primary: decorPrimary,
-          secondary: decorSecondary,
-          primaryChance: 0.02,
-          secondaryChance: 0.04,
-          seed: 399,
-        },
-      };
-    };
-
-    const set =
-      biome === "forest"
-        ? makeForest()
-        : biome === "ice"
-          ? makeIce()
-          : biome === "dungeon"
-            ? makeDungeon()
-            : makeLava();
-
-    this.biomeTextureCache.set(biome, set);
-    return set;
+  async loadMap(map: GeneratedMap) {
+    await this.ensureAtlasLoaded();
+    this.cols = map.cols;
+    this.rows = map.rows;
+    this.wallRects = map.wallRects;
+    this.rebuild(map);
   }
 
-  async setMap(mapData: MapData) {
-    await this.ensureAtlasTexture();
+  private getThemeTextures(theme: MapTheme): ThemeTextures {
+    const cached = this.themeTextureCache.get(theme);
+    if (cached) return cached;
+    const created = createThemeTextures(theme);
+    this.themeTextureCache.set(theme, created);
+    return created;
+  }
 
-    if (mapData.tileSize !== TS) {
-      console.warn(
-        `[TilemapSystem] Unsupported tileSize=${mapData.tileSize}; expected ${TS}. Rendering may look wrong.`,
-      );
-    }
-
-    this.cols = mapData.cols;
-    this.rows = mapData.rows;
-    this.tileSize = mapData.tileSize;
-    this.wallRects = mapData.wallRects;
-
-    // Reset cached texture so we can rebuild without stale rendering.
+  private rebuild(map: GeneratedMap) {
+    // Reset cache + children
     this.container.cacheAsTexture(false);
-    const oldChildren = this.container.removeChildren();
-    for (const child of oldChildren) child.destroy();
-
-    const atlasTexture = this.atlasTexture;
-
-    const createTileTexture = (
-      draw: (ctx: CanvasRenderingContext2D) => void,
-    ): Texture => {
-      const canvas = document.createElement("canvas");
-      canvas.width = TS;
-      canvas.height = TS;
-
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
-        throw new Error(
-          "[TilemapSystem] Unable to create 2D canvas context for fallback tile textures.",
-        );
-      }
-
-      ctx.imageSmoothingEnabled = false;
-      draw(ctx);
-
-      const tex = Texture.from(canvas, true);
-      tex.source.scaleMode = SCALE_MODES.NEAREST;
-      return tex;
-    };
-
-    const textureSet = this.getBiomeTextures(mapData.biome, createTileTexture);
+    for (const child of this.container.removeChildren()) {
+      child.destroy();
+    }
 
     const protectedTiles = new Set<string>();
     const protect = (tx: number, ty: number) => {
@@ -843,63 +120,66 @@ export class TilemapSystem {
       }
     };
     protect(
-      Math.floor(mapData.playerSpawn[0] / TS),
-      Math.floor(mapData.playerSpawn[1] / TS),
+      Math.floor(map.playerSpawn[0] / TS),
+      Math.floor(map.playerSpawn[1] / TS),
     );
-    for (const [sx, sy] of mapData.enemySpawns) {
+    for (const [sx, sy] of map.enemySpawns) {
       protect(Math.floor(sx / TS), Math.floor(sy / TS));
     }
 
-    const tileTexCache = new Map<string, Texture>();
+    // Crée une texture par tuile de l'atlas
     const getTileTex = (col: number, row: number): Texture => {
+      const atlasTexture = this.atlasTexture;
       if (!atlasTexture) return Texture.WHITE;
 
       const key = `${col},${row}`;
-      const cached = tileTexCache.get(key);
+      const cached = this.atlasTileCache.get(key);
       if (cached) return cached;
 
       const tileTex = new Texture({
         source: atlasTexture.source,
         frame: new Rectangle(col * TS, row * TS, TS, TS),
       });
-      tileTexCache.set(key, tileTex);
+      this.atlasTileCache.set(key, tileTex);
       return tileTex;
     };
 
-    const grid = mapData.grid;
-    const rows = mapData.rows;
-    const cols = mapData.cols;
-    const tints = BIOME_TINTS[mapData.biome];
+    const themeTextures = this.getThemeTextures(map.theme);
+
+    // Dessine chaque tuile
+    const grid = map.grid;
+    const rows = map.rows;
+    const cols = map.cols;
+    const atlasTexture = this.atlasTexture;
 
     for (let y = 0; y < rows; y++) {
       for (let x = 0; x < cols; x++) {
-        const cell = grid[y][x];
+        const cell = grid[y]?.[x] ?? TILE_EMPTY;
         if (cell === TILE_EMPTY) continue;
 
         let texture: Texture;
-        let tint = 0xffffff;
-
         if (atlasTexture) {
           let tileCoords: [number, number];
-          if (cell === TILE_FLOOR) {
+          if (isWalkableTile(cell)) {
             tileCoords = seededPick(FLOOR_TILES, x, y);
-            tint = tints.floor;
           } else {
-            const isTop = y + 1 < rows && grid[y + 1][x] === TILE_FLOOR;
+            // mur: si le sol est juste en dessous => face visible du mur
+            const isTop =
+              y + 1 < rows && isWalkableTile(grid[y + 1]?.[x] ?? TILE_EMPTY);
             tileCoords = seededPick(isTop ? WALL_TOP : WALL_TILES, x, y);
-            tint = isTop ? tints.wallTop : tints.wall;
-            if (cell === TILE_TREE) tint = tints.tree;
-            else if (cell === TILE_BUSH) tint = tints.bush;
           }
           texture = getTileTex(tileCoords[0], tileCoords[1]);
-        } else if (cell === TILE_FLOOR) {
-          texture = seededPick(textureSet.floor, x, y);
+        } else if (isWalkableTile(cell)) {
+          const list =
+            cell === TILE_CARPET ? themeTextures.carpet : themeTextures.floor;
+          texture = seededPick(list, x, y);
         } else {
-          const isTop = y + 1 < rows && grid[y + 1][x] === TILE_FLOOR;
-          const wallTypeIndex =
-            cell === TILE_TREE ? 1 : cell === TILE_BUSH ? 2 : 0;
-          const texList = isTop ? textureSet.wallTop : textureSet.wall;
-          texture = texList[wallTypeIndex] ?? texList[0];
+          const isTop =
+            y + 1 < rows && isWalkableTile(grid[y + 1]?.[x] ?? TILE_EMPTY);
+          const wallSet =
+            themeTextures.wallByType.get(cell) ??
+            themeTextures.wallByType.get(TILE_WALL);
+          texture = seededPick(isTop ? wallSet!.top : wallSet!.body, x, y);
         }
 
         const sprite = new Sprite(texture);
@@ -907,28 +187,34 @@ export class TilemapSystem {
         sprite.y = y * TS;
         sprite.width = TS;
         sprite.height = TS;
-        if (atlasTexture) sprite.tint = tint;
         this.container.addChild(sprite);
 
+        // Décors (uniquement en fallback, pour donner un look forêt)
         if (
-          cell === TILE_FLOOR &&
+          isWalkableTile(cell) &&
           !atlasTexture &&
-          textureSet.decor &&
+          themeTextures.decorEnabled &&
           !protectedTiles.has(`${x},${y}`)
         ) {
-          const roll = seededRand01(x, y, textureSet.decor.seed);
-          if (roll < textureSet.decor.primaryChance) {
-            const decor = new Sprite(
-              seededPick(textureSet.decor.primary, x, y),
-            );
+          const themeSeed = map.theme === "fairy_forest" ? 101 : 99;
+          const roll = seededRand01(x, y, themeSeed);
+          if (roll < 0.018 && themeTextures.treeDecor.length > 0) {
+            const decor = new Sprite(seededPick(themeTextures.treeDecor, x, y));
             decor.x = x * TS;
             decor.y = y * TS;
             decor.width = TS;
             decor.height = TS;
             this.container.addChild(decor);
-          } else if (roll < textureSet.decor.secondaryChance) {
+          } else if (roll < 0.032 && themeTextures.rockDecor.length > 0) {
+            const decor = new Sprite(seededPick(themeTextures.rockDecor, x, y));
+            decor.x = x * TS;
+            decor.y = y * TS;
+            decor.width = TS;
+            decor.height = TS;
+            this.container.addChild(decor);
+          } else if (roll < 0.05 && themeTextures.sparkleDecor.length > 0) {
             const decor = new Sprite(
-              seededPick(textureSet.decor.secondary, x, y),
+              seededPick(themeTextures.sparkleDecor, x, y),
             );
             decor.x = x * TS;
             decor.y = y * TS;
@@ -945,9 +231,9 @@ export class TilemapSystem {
 
   resolveWallCollisions(world: World) {
     const entities = world.query(["Position", "Velocity"]);
-    if (this.wallRects.length === 0) return;
 
     for (const id of entities) {
+      if (world.hasComponent(id, "RemotePlayerTag")) continue;
       const pos = world.getComponent<Position>(id, "Position")!;
       const radius = 16; // demi-taille du sprite
 
@@ -990,8 +276,944 @@ export class TilemapSystem {
 
   get bounds() {
     return {
-      width: this.cols * this.tileSize,
-      height: this.rows * this.tileSize,
+      width: this.cols * TS,
+      height: this.rows * TS,
     };
   }
+}
+
+type WallTexturePair = { body: Texture[]; top: Texture[] };
+
+interface ThemeTextures {
+  floor: Texture[];
+  carpet: Texture[];
+  wallByType: Map<number, WallTexturePair>;
+  decorEnabled: boolean;
+  treeDecor: Texture[];
+  rockDecor: Texture[];
+  sparkleDecor: Texture[];
+}
+
+function createThemeTextures(theme: MapTheme): ThemeTextures {
+  const createTileTexture = (
+    draw: (ctx: CanvasRenderingContext2D) => void,
+  ): Texture => {
+    const canvas = document.createElement("canvas");
+    canvas.width = TS;
+    canvas.height = TS;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      throw new Error(
+        "[TilemapSystem] Unable to create 2D canvas context for fallback tile textures.",
+      );
+    }
+    ctx.imageSmoothingEnabled = false;
+    draw(ctx);
+    const tex = Texture.from(canvas, true);
+    tex.source.scaleMode = SCALE_MODES.NEAREST;
+    return tex;
+  };
+
+  const makeNoisyTile = (options: {
+    base: string;
+    dark: string;
+    light: string;
+    seed: number;
+    darkChance: number;
+    lightChance: number;
+    topHighlight?: string;
+    bottomShade?: boolean;
+  }) =>
+    createTileTexture((ctx) => {
+      ctx.fillStyle = options.base;
+      ctx.fillRect(0, 0, TS, TS);
+      for (let py = 0; py < TS; py++) {
+        for (let px = 0; px < TS; px++) {
+          const r = seededRand01(px, py, options.seed);
+          if (r < options.darkChance) {
+            ctx.fillStyle = options.dark;
+            ctx.fillRect(px, py, 1, 1);
+          } else if (r > 1 - options.lightChance) {
+            ctx.fillStyle = options.light;
+            ctx.fillRect(px, py, 1, 1);
+          }
+        }
+      }
+      if (options.topHighlight) {
+        ctx.fillStyle = options.topHighlight;
+        ctx.fillRect(0, 0, TS, 3);
+      }
+      if (options.bottomShade) {
+        ctx.fillStyle = "rgba(0,0,0,0.18)";
+        ctx.fillRect(0, 12, TS, 4);
+      }
+    });
+
+  const makeTreeTile = (options: {
+    base: string;
+    dark: string;
+    light: string;
+    trunk: string;
+    seed: number;
+    topHighlight?: boolean;
+  }) =>
+    createTileTexture((ctx) => {
+      ctx.fillStyle = options.base;
+      ctx.fillRect(0, 0, TS, TS);
+      for (let py = 0; py < TS; py++) {
+        for (let px = 0; px < TS; px++) {
+          const r = seededRand01(px, py, options.seed);
+          if (r < 0.08) {
+            ctx.fillStyle = options.dark;
+            ctx.fillRect(px, py, 1, 1);
+          } else if (r > 0.95) {
+            ctx.fillStyle = options.light;
+            ctx.fillRect(px, py, 1, 1);
+          }
+        }
+      }
+      ctx.fillStyle = options.trunk;
+      ctx.fillRect(7, 7, 2, 3);
+      if (options.topHighlight) {
+        ctx.fillStyle = "rgba(255,255,255,0.08)";
+        ctx.fillRect(0, 0, TS, 3);
+      }
+    });
+
+  const makePillarTile = (options: {
+    base: string;
+    shadow: string;
+    highlight: string;
+    seed: number;
+    topHighlight?: boolean;
+  }) =>
+    createTileTexture((ctx) => {
+      ctx.fillStyle = options.base;
+      ctx.fillRect(0, 0, TS, TS);
+      // colonne
+      ctx.fillStyle = options.highlight;
+      ctx.fillRect(6, 2, 1, 12);
+      ctx.fillRect(9, 2, 1, 12);
+      ctx.fillStyle = options.shadow;
+      ctx.fillRect(5, 2, 1, 12);
+      ctx.fillRect(10, 2, 1, 12);
+      // petites fissures
+      for (let i = 0; i < 8; i++) {
+        const fx = Math.floor(seededRand01(i, 1, options.seed) * TS);
+        const fy = Math.floor(seededRand01(i, 2, options.seed) * TS);
+        ctx.fillStyle = "rgba(0,0,0,0.22)";
+        ctx.fillRect(fx, fy, 1, 1);
+      }
+      if (options.topHighlight) {
+        ctx.fillStyle = "rgba(255,255,255,0.1)";
+        ctx.fillRect(0, 0, TS, 3);
+      }
+      ctx.fillStyle = "rgba(0,0,0,0.18)";
+      ctx.fillRect(0, 12, TS, 4);
+    });
+
+  const makeLavaTile = (hot: boolean, seed: number, topHighlight?: boolean) =>
+    createTileTexture((ctx) => {
+      ctx.fillStyle = hot ? "#ff3b00" : "#ff5a00";
+      ctx.fillRect(0, 0, TS, TS);
+      for (let py = 0; py < TS; py++) {
+        for (let px = 0; px < TS; px++) {
+          const r = seededRand01(px, py, seed);
+          if (r < 0.06) {
+            ctx.fillStyle = "#b01400";
+            ctx.fillRect(px, py, 1, 1);
+          } else if (r > 0.94) {
+            ctx.fillStyle = "#ffd36a";
+            ctx.fillRect(px, py, 1, 1);
+          }
+        }
+      }
+      // bulles
+      for (let i = 0; i < 4; i++) {
+        const bx = Math.floor(seededRand01(i, 7, seed) * TS);
+        const by = Math.floor(seededRand01(i, 9, seed) * TS);
+        ctx.fillStyle = "rgba(255,255,255,0.16)";
+        ctx.fillRect(bx, by, 1, 1);
+      }
+      if (topHighlight) {
+        ctx.fillStyle = "rgba(255,255,255,0.14)";
+        ctx.fillRect(0, 0, TS, 3);
+      }
+      ctx.fillStyle = "rgba(0,0,0,0.22)";
+      ctx.fillRect(0, 12, TS, 4);
+    });
+
+  const makeCarpetTile = (seed: number) =>
+    createTileTexture((ctx) => {
+      ctx.fillStyle = "#7a1717";
+      ctx.fillRect(0, 0, TS, TS);
+      // bordures or
+      ctx.fillStyle = "#d2b14a";
+      ctx.fillRect(1, 1, TS - 2, 1);
+      ctx.fillRect(1, TS - 2, TS - 2, 1);
+      // motif
+      for (let i = 0; i < 10; i++) {
+        const mx = Math.floor(seededRand01(i, 2, seed) * (TS - 4)) + 2;
+        const my = Math.floor(seededRand01(i, 3, seed) * (TS - 4)) + 2;
+        ctx.fillStyle = i % 2 === 0 ? "#a31f1f" : "#8b1b1b";
+        ctx.fillRect(mx, my, 1, 1);
+      }
+    });
+
+  const makeSparkleTile = (seed: number) =>
+    createTileTexture((ctx) => {
+      ctx.clearRect(0, 0, TS, TS);
+      const cx = 8;
+      const cy = 8;
+      ctx.fillStyle = "rgba(255,255,255,0.75)";
+      ctx.fillRect(cx, cy, 1, 1);
+      ctx.fillStyle = "rgba(255,170,255,0.65)";
+      ctx.fillRect(cx - 1, cy, 1, 1);
+      ctx.fillRect(cx + 1, cy, 1, 1);
+      ctx.fillStyle = "rgba(120,220,255,0.55)";
+      ctx.fillRect(cx, cy - 1, 1, 1);
+      ctx.fillRect(cx, cy + 1, 1, 1);
+
+      // mini variations
+      const v = seededRand01(1, 1, seed);
+      if (v > 0.6) {
+        ctx.fillStyle = "rgba(255,255,255,0.35)";
+        ctx.fillRect(cx - 2, cy, 1, 1);
+      }
+    });
+
+  const makeRockDecor = (seed: number) =>
+    createTileTexture((ctx) => {
+      ctx.clearRect(0, 0, TS, TS);
+      const base = seededRand01(1, 1, seed) > 0.5 ? "#7b8088" : "#6f747c";
+      ctx.fillStyle = base;
+      ctx.fillRect(4, 7, 8, 5);
+      ctx.fillStyle = "#666b73";
+      ctx.fillRect(5, 8, 6, 3);
+      ctx.fillStyle = "#8f959e";
+      ctx.fillRect(6, 8, 2, 1);
+      ctx.fillRect(9, 9, 1, 1);
+    });
+
+  const makeTreeDecor = (leafBase: string, seed: number) =>
+    createTileTexture((ctx) => {
+      ctx.clearRect(0, 0, TS, TS);
+      const cx = 8;
+      const cy = 8;
+      const r = 7;
+      for (let py = 0; py < TS; py++) {
+        for (let px = 0; px < TS; px++) {
+          const dx = px - cx;
+          const dy = py - cy;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist <= r) {
+            const n = seededRand01(px, py, seed);
+            if (n < 0.08) ctx.fillStyle = "rgba(0,0,0,0.25)";
+            else if (n > 0.92) ctx.fillStyle = "rgba(255,255,255,0.12)";
+            else ctx.fillStyle = leafBase;
+            ctx.fillRect(px, py, 1, 1);
+          }
+        }
+      }
+      ctx.fillStyle = "#6a4a26";
+      ctx.fillRect(7, 9, 2, 3);
+    });
+
+  const wallByType = new Map<number, WallTexturePair>();
+  const floor: Texture[] = [];
+  const carpet: Texture[] = [];
+  const treeDecor: Texture[] = [];
+  const rockDecor: Texture[] = [];
+  const sparkleDecor: Texture[] = [];
+  let decorEnabled = false;
+
+  switch (theme) {
+    case "forest": {
+      floor.push(
+        makeNoisyTile({
+          base: "#2f7a3a",
+          dark: "#256530",
+          light: "#3e8a46",
+          seed: 1,
+          darkChance: 0.06,
+          lightChance: 0.06,
+        }),
+        makeNoisyTile({
+          base: "#2d7637",
+          dark: "#245f2e",
+          light: "#4a9151",
+          seed: 2,
+          darkChance: 0.08,
+          lightChance: 0.04,
+        }),
+        createTileTexture((ctx) => {
+          ctx.fillStyle = "#2f7a3a";
+          ctx.fillRect(0, 0, TS, TS);
+          ctx.fillStyle = "#6b4f2a";
+          ctx.fillRect(5, 6, 6, 5);
+          ctx.fillStyle = "#5a4122";
+          ctx.fillRect(6, 7, 4, 3);
+          for (let py = 0; py < TS; py++) {
+            for (let px = 0; px < TS; px++) {
+              const r = seededRand01(px, py, 3);
+              if (r < 0.04) {
+                ctx.fillStyle = "#256530";
+                ctx.fillRect(px, py, 1, 1);
+              }
+            }
+          }
+        }),
+      );
+      carpet.push(...floor);
+
+      wallByType.set(TILE_WALL, {
+        body: [
+          makeNoisyTile({
+            base: "#6d727a",
+            dark: "#575c63",
+            light: "#878d96",
+            seed: 11,
+            darkChance: 0.08,
+            lightChance: 0.07,
+            bottomShade: true,
+          }),
+        ],
+        top: [
+          makeNoisyTile({
+            base: "#6d727a",
+            dark: "#575c63",
+            light: "#878d96",
+            seed: 11,
+            darkChance: 0.08,
+            lightChance: 0.07,
+            topHighlight: "rgba(255,255,255,0.1)",
+            bottomShade: true,
+          }),
+        ],
+      });
+      wallByType.set(TILE_TREE, {
+        body: [
+          makeTreeTile({
+            base: "#204b26",
+            dark: "#193a1e",
+            light: "#2a602f",
+            trunk: "#6a4a26",
+            seed: 12,
+          }),
+        ],
+        top: [
+          makeTreeTile({
+            base: "#204b26",
+            dark: "#193a1e",
+            light: "#2a602f",
+            trunk: "#6a4a26",
+            seed: 12,
+            topHighlight: true,
+          }),
+        ],
+      });
+      wallByType.set(TILE_BUSH, {
+        body: [
+          makeNoisyTile({
+            base: "#1f4a25",
+            dark: "#17361b",
+            light: "#2f6a34",
+            seed: 13,
+            darkChance: 0.1,
+            lightChance: 0.08,
+          }),
+        ],
+        top: [
+          makeNoisyTile({
+            base: "#1f4a25",
+            dark: "#17361b",
+            light: "#2f6a34",
+            seed: 13,
+            darkChance: 0.1,
+            lightChance: 0.08,
+            topHighlight: "rgba(255,255,255,0.08)",
+          }),
+        ],
+      });
+
+      // Default for unused wall types in this theme
+      wallByType.set(TILE_PILLAR, wallByType.get(TILE_WALL)!);
+      wallByType.set(TILE_STATUE, wallByType.get(TILE_WALL)!);
+      wallByType.set(TILE_LAVA, {
+        body: [makeLavaTile(false, 71)],
+        top: [makeLavaTile(false, 71, true)],
+      });
+      wallByType.set(TILE_RUBBLE, wallByType.get(TILE_WALL)!);
+
+      decorEnabled = true;
+      treeDecor.push(makeTreeDecor("#204b26", 31));
+      rockDecor.push(makeRockDecor(41));
+      break;
+    }
+    case "fairy_forest": {
+      floor.push(
+        makeNoisyTile({
+          base: "#3aa85a",
+          dark: "#2f8b4a",
+          light: "#57d27a",
+          seed: 101,
+          darkChance: 0.05,
+          lightChance: 0.05,
+        }),
+        makeNoisyTile({
+          base: "#36a555",
+          dark: "#2a8747",
+          light: "#67e08a",
+          seed: 102,
+          darkChance: 0.06,
+          lightChance: 0.04,
+        }),
+        makeNoisyTile({
+          base: "#3aa85a",
+          dark: "#2f8b4a",
+          light: "#57d27a",
+          seed: 103,
+          darkChance: 0.04,
+          lightChance: 0.06,
+        }),
+      );
+      carpet.push(...floor);
+
+      wallByType.set(TILE_WALL, {
+        body: [
+          makeNoisyTile({
+            base: "#6a6b86",
+            dark: "#4e4f66",
+            light: "#9a9dc0",
+            seed: 111,
+            darkChance: 0.08,
+            lightChance: 0.08,
+            bottomShade: true,
+          }),
+        ],
+        top: [
+          makeNoisyTile({
+            base: "#6a6b86",
+            dark: "#4e4f66",
+            light: "#9a9dc0",
+            seed: 111,
+            darkChance: 0.08,
+            lightChance: 0.08,
+            topHighlight: "rgba(255,255,255,0.12)",
+            bottomShade: true,
+          }),
+        ],
+      });
+      wallByType.set(TILE_TREE, {
+        body: [
+          makeTreeTile({
+            base: "#24773a",
+            dark: "#1e5b2d",
+            light: "#38a752",
+            trunk: "#7a4f28",
+            seed: 112,
+          }),
+        ],
+        top: [
+          makeTreeTile({
+            base: "#24773a",
+            dark: "#1e5b2d",
+            light: "#38a752",
+            trunk: "#7a4f28",
+            seed: 112,
+            topHighlight: true,
+          }),
+        ],
+      });
+      wallByType.set(TILE_BUSH, {
+        body: [
+          makeNoisyTile({
+            base: "#1f6a37",
+            dark: "#19552c",
+            light: "#2fae59",
+            seed: 113,
+            darkChance: 0.1,
+            lightChance: 0.08,
+          }),
+        ],
+        top: [
+          makeNoisyTile({
+            base: "#1f6a37",
+            dark: "#19552c",
+            light: "#2fae59",
+            seed: 113,
+            darkChance: 0.1,
+            lightChance: 0.08,
+            topHighlight: "rgba(255,255,255,0.1)",
+          }),
+        ],
+      });
+      wallByType.set(TILE_STATUE, {
+        body: [
+          makeNoisyTile({
+            base: "#6fd7ff",
+            dark: "#3ea8d5",
+            light: "#d1f3ff",
+            seed: 114,
+            darkChance: 0.05,
+            lightChance: 0.06,
+            bottomShade: true,
+          }),
+        ],
+        top: [
+          makeNoisyTile({
+            base: "#6fd7ff",
+            dark: "#3ea8d5",
+            light: "#d1f3ff",
+            seed: 114,
+            darkChance: 0.05,
+            lightChance: 0.06,
+            topHighlight: "rgba(255,255,255,0.2)",
+            bottomShade: true,
+          }),
+        ],
+      });
+
+      wallByType.set(TILE_PILLAR, wallByType.get(TILE_WALL)!);
+      wallByType.set(TILE_LAVA, {
+        body: [makeLavaTile(false, 171)],
+        top: [makeLavaTile(false, 171, true)],
+      });
+      wallByType.set(TILE_RUBBLE, wallByType.get(TILE_WALL)!);
+
+      decorEnabled = true;
+      treeDecor.push(makeTreeDecor("#2d8a48", 131));
+      rockDecor.push(makeRockDecor(141));
+      sparkleDecor.push(makeSparkleTile(151), makeSparkleTile(152));
+      break;
+    }
+    case "dungeon": {
+      floor.push(
+        makeNoisyTile({
+          base: "#3b3d44",
+          dark: "#2a2b30",
+          light: "#545862",
+          seed: 201,
+          darkChance: 0.09,
+          lightChance: 0.05,
+        }),
+        makeNoisyTile({
+          base: "#373941",
+          dark: "#282a2f",
+          light: "#505460",
+          seed: 202,
+          darkChance: 0.08,
+          lightChance: 0.06,
+        }),
+      );
+      carpet.push(...floor);
+
+      const wallBody = makeNoisyTile({
+        base: "#2a2b30",
+        dark: "#1c1d21",
+        light: "#3f414a",
+        seed: 211,
+        darkChance: 0.12,
+        lightChance: 0.06,
+        bottomShade: true,
+      });
+      const wallTop = makeNoisyTile({
+        base: "#2a2b30",
+        dark: "#1c1d21",
+        light: "#3f414a",
+        seed: 211,
+        darkChance: 0.12,
+        lightChance: 0.06,
+        topHighlight: "rgba(255,255,255,0.08)",
+        bottomShade: true,
+      });
+      wallByType.set(TILE_WALL, { body: [wallBody], top: [wallTop] });
+      wallByType.set(TILE_PILLAR, {
+        body: [
+          makePillarTile({
+            base: "#4b4e58",
+            shadow: "#2a2c33",
+            highlight: "#7a7f8f",
+            seed: 212,
+          }),
+        ],
+        top: [
+          makePillarTile({
+            base: "#4b4e58",
+            shadow: "#2a2c33",
+            highlight: "#7a7f8f",
+            seed: 212,
+            topHighlight: true,
+          }),
+        ],
+      });
+      wallByType.set(TILE_TREE, wallByType.get(TILE_WALL)!);
+      wallByType.set(TILE_BUSH, wallByType.get(TILE_WALL)!);
+      wallByType.set(TILE_STATUE, wallByType.get(TILE_PILLAR)!);
+      wallByType.set(TILE_RUBBLE, wallByType.get(TILE_WALL)!);
+      wallByType.set(TILE_LAVA, {
+        body: [makeLavaTile(false, 271)],
+        top: [makeLavaTile(false, 271, true)],
+      });
+      decorEnabled = false;
+      break;
+    }
+    case "kings_hall": {
+      floor.push(
+        makeNoisyTile({
+          base: "#b8bcc6",
+          dark: "#9aa0ad",
+          light: "#e3e7ef",
+          seed: 301,
+          darkChance: 0.05,
+          lightChance: 0.05,
+        }),
+        makeNoisyTile({
+          base: "#b1b6c1",
+          dark: "#8f96a4",
+          light: "#edf0f6",
+          seed: 302,
+          darkChance: 0.04,
+          lightChance: 0.06,
+        }),
+      );
+      carpet.push(makeCarpetTile(311), makeCarpetTile(312));
+
+      wallByType.set(TILE_WALL, {
+        body: [
+          makeNoisyTile({
+            base: "#40424a",
+            dark: "#26272c",
+            light: "#5f626c",
+            seed: 321,
+            darkChance: 0.1,
+            lightChance: 0.06,
+            bottomShade: true,
+          }),
+        ],
+        top: [
+          makeNoisyTile({
+            base: "#40424a",
+            dark: "#26272c",
+            light: "#5f626c",
+            seed: 321,
+            darkChance: 0.1,
+            lightChance: 0.06,
+            topHighlight: "rgba(255,255,255,0.08)",
+            bottomShade: true,
+          }),
+        ],
+      });
+      wallByType.set(TILE_PILLAR, {
+        body: [
+          makePillarTile({
+            base: "#a9adba",
+            shadow: "#7c8191",
+            highlight: "#f1f3f8",
+            seed: 322,
+          }),
+        ],
+        top: [
+          makePillarTile({
+            base: "#a9adba",
+            shadow: "#7c8191",
+            highlight: "#f1f3f8",
+            seed: 322,
+            topHighlight: true,
+          }),
+        ],
+      });
+      wallByType.set(TILE_STATUE, {
+        body: [
+          makeNoisyTile({
+            base: "#c8a43a",
+            dark: "#8c6f1d",
+            light: "#ffe38a",
+            seed: 323,
+            darkChance: 0.06,
+            lightChance: 0.06,
+            bottomShade: true,
+          }),
+        ],
+        top: [
+          makeNoisyTile({
+            base: "#c8a43a",
+            dark: "#8c6f1d",
+            light: "#ffe38a",
+            seed: 323,
+            darkChance: 0.06,
+            lightChance: 0.06,
+            topHighlight: "rgba(255,255,255,0.14)",
+            bottomShade: true,
+          }),
+        ],
+      });
+      wallByType.set(TILE_RUBBLE, {
+        body: [
+          makeNoisyTile({
+            base: "#6f7380",
+            dark: "#4a4d57",
+            light: "#9aa0ad",
+            seed: 324,
+            darkChance: 0.1,
+            lightChance: 0.08,
+            bottomShade: true,
+          }),
+        ],
+        top: [
+          makeNoisyTile({
+            base: "#6f7380",
+            dark: "#4a4d57",
+            light: "#9aa0ad",
+            seed: 324,
+            darkChance: 0.1,
+            lightChance: 0.08,
+            topHighlight: "rgba(255,255,255,0.1)",
+            bottomShade: true,
+          }),
+        ],
+      });
+
+      wallByType.set(TILE_TREE, wallByType.get(TILE_WALL)!);
+      wallByType.set(TILE_BUSH, wallByType.get(TILE_WALL)!);
+      wallByType.set(TILE_LAVA, {
+        body: [makeLavaTile(false, 371)],
+        top: [makeLavaTile(false, 371, true)],
+      });
+      decorEnabled = false;
+      break;
+    }
+    case "castle_courtyard": {
+      floor.push(
+        makeNoisyTile({
+          base: "#6a6f78",
+          dark: "#50545b",
+          light: "#8b919c",
+          seed: 401,
+          darkChance: 0.08,
+          lightChance: 0.06,
+        }),
+        makeNoisyTile({
+          base: "#646971",
+          dark: "#4c4f56",
+          light: "#8e949f",
+          seed: 402,
+          darkChance: 0.08,
+          lightChance: 0.06,
+        }),
+      );
+      carpet.push(...floor);
+
+      wallByType.set(TILE_WALL, {
+        body: [
+          makeNoisyTile({
+            base: "#4c4f56",
+            dark: "#2e3035",
+            light: "#6f7380",
+            seed: 411,
+            darkChance: 0.1,
+            lightChance: 0.08,
+            bottomShade: true,
+          }),
+        ],
+        top: [
+          makeNoisyTile({
+            base: "#4c4f56",
+            dark: "#2e3035",
+            light: "#6f7380",
+            seed: 411,
+            darkChance: 0.1,
+            lightChance: 0.08,
+            topHighlight: "rgba(255,255,255,0.08)",
+            bottomShade: true,
+          }),
+        ],
+      });
+      wallByType.set(TILE_BUSH, {
+        body: [
+          makeNoisyTile({
+            base: "#245a33",
+            dark: "#1b4226",
+            light: "#2f7a45",
+            seed: 412,
+            darkChance: 0.1,
+            lightChance: 0.08,
+          }),
+        ],
+        top: [
+          makeNoisyTile({
+            base: "#245a33",
+            dark: "#1b4226",
+            light: "#2f7a45",
+            seed: 412,
+            darkChance: 0.1,
+            lightChance: 0.08,
+            topHighlight: "rgba(255,255,255,0.08)",
+          }),
+        ],
+      });
+      wallByType.set(TILE_TREE, {
+        body: [
+          makeTreeTile({
+            base: "#234c2c",
+            dark: "#17361b",
+            light: "#2f6a34",
+            trunk: "#6a4a26",
+            seed: 413,
+          }),
+        ],
+        top: [
+          makeTreeTile({
+            base: "#234c2c",
+            dark: "#17361b",
+            light: "#2f6a34",
+            trunk: "#6a4a26",
+            seed: 413,
+            topHighlight: true,
+          }),
+        ],
+      });
+      wallByType.set(TILE_STATUE, wallByType.get(TILE_WALL)!);
+      wallByType.set(TILE_PILLAR, wallByType.get(TILE_WALL)!);
+      wallByType.set(TILE_RUBBLE, wallByType.get(TILE_WALL)!);
+      wallByType.set(TILE_LAVA, {
+        body: [makeLavaTile(false, 471)],
+        top: [makeLavaTile(false, 471, true)],
+      });
+
+      decorEnabled = true;
+      sparkleDecor.push(makeSparkleTile(451));
+      rockDecor.push(makeRockDecor(452));
+      break;
+    }
+    case "battlefield": {
+      floor.push(
+        makeNoisyTile({
+          base: "#5a452c",
+          dark: "#3e2f1f",
+          light: "#7a6242",
+          seed: 501,
+          darkChance: 0.1,
+          lightChance: 0.06,
+        }),
+        makeNoisyTile({
+          base: "#564129",
+          dark: "#362818",
+          light: "#7a6242",
+          seed: 502,
+          darkChance: 0.11,
+          lightChance: 0.05,
+        }),
+      );
+      carpet.push(...floor);
+
+      wallByType.set(TILE_RUBBLE, {
+        body: [
+          makeNoisyTile({
+            base: "#3a2f26",
+            dark: "#221b16",
+            light: "#5a4a3f",
+            seed: 511,
+            darkChance: 0.12,
+            lightChance: 0.06,
+            bottomShade: true,
+          }),
+        ],
+        top: [
+          makeNoisyTile({
+            base: "#3a2f26",
+            dark: "#221b16",
+            light: "#5a4a3f",
+            seed: 511,
+            darkChance: 0.12,
+            lightChance: 0.06,
+            topHighlight: "rgba(255,255,255,0.06)",
+            bottomShade: true,
+          }),
+        ],
+      });
+      wallByType.set(TILE_WALL, wallByType.get(TILE_RUBBLE)!);
+      wallByType.set(TILE_TREE, wallByType.get(TILE_RUBBLE)!);
+      wallByType.set(TILE_BUSH, wallByType.get(TILE_RUBBLE)!);
+      wallByType.set(TILE_PILLAR, wallByType.get(TILE_RUBBLE)!);
+      wallByType.set(TILE_STATUE, wallByType.get(TILE_RUBBLE)!);
+      wallByType.set(TILE_LAVA, {
+        body: [makeLavaTile(false, 571)],
+        top: [makeLavaTile(false, 571, true)],
+      });
+      decorEnabled = false;
+      break;
+    }
+    case "rocky_lava":
+    case "volcanic": {
+      const hot = theme === "volcanic";
+      floor.push(
+        makeNoisyTile({
+          base: hot ? "#1e1d22" : "#24232a",
+          dark: "#121117",
+          light: hot ? "#3b3943" : "#34313a",
+          seed: hot ? 601 : 602,
+          darkChance: 0.11,
+          lightChance: 0.05,
+        }),
+        makeNoisyTile({
+          base: hot ? "#1c1b20" : "#222129",
+          dark: "#141217",
+          light: hot ? "#3a3842" : "#34313a",
+          seed: hot ? 603 : 604,
+          darkChance: 0.11,
+          lightChance: 0.05,
+        }),
+      );
+      carpet.push(...floor);
+
+      wallByType.set(TILE_WALL, {
+        body: [
+          makeNoisyTile({
+            base: hot ? "#2a2830" : "#2f2d36",
+            dark: "#1a1820",
+            light: hot ? "#4a4754" : "#474452",
+            seed: 611,
+            darkChance: 0.12,
+            lightChance: 0.06,
+            bottomShade: true,
+          }),
+        ],
+        top: [
+          makeNoisyTile({
+            base: hot ? "#2a2830" : "#2f2d36",
+            dark: "#1a1820",
+            light: hot ? "#4a4754" : "#474452",
+            seed: 611,
+            darkChance: 0.12,
+            lightChance: 0.06,
+            topHighlight: "rgba(255,255,255,0.08)",
+            bottomShade: true,
+          }),
+        ],
+      });
+      wallByType.set(TILE_LAVA, {
+        body: [makeLavaTile(hot, 671)],
+        top: [makeLavaTile(hot, 671, true)],
+      });
+
+      wallByType.set(TILE_TREE, wallByType.get(TILE_WALL)!);
+      wallByType.set(TILE_BUSH, wallByType.get(TILE_WALL)!);
+      wallByType.set(TILE_PILLAR, wallByType.get(TILE_WALL)!);
+      wallByType.set(TILE_STATUE, wallByType.get(TILE_WALL)!);
+      wallByType.set(TILE_RUBBLE, wallByType.get(TILE_WALL)!);
+      decorEnabled = false;
+      break;
+    }
+  }
+
+  return {
+    floor,
+    carpet: carpet.length > 0 ? carpet : floor,
+    wallByType,
+    decorEnabled,
+    treeDecor,
+    rockDecor,
+    sparkleDecor,
+  };
 }

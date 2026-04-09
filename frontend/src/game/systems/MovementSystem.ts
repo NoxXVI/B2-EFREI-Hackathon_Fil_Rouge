@@ -1,5 +1,6 @@
 import { World } from "../ecs/World";
-import { Position, Velocity } from "../components";
+import { type DashState, Position, Velocity } from "../components";
+import { DASH_SPEED } from "../config/abilities";
 
 export function movementSystem(world: World, deltaMS: number) {
   const dt = deltaMS / 1000;
@@ -9,6 +10,8 @@ export function movementSystem(world: World, deltaMS: number) {
   for (const entity of movingEntities) {
     const pos = world.getComponent<Position>(entity, "Position")!;
     const vel = world.getComponent<Velocity>(entity, "Velocity")!;
+    const dash = world.getComponent<DashState>(entity, "DashState");
+    const speed = dash && dash.activeMS > 0 ? DASH_SPEED : vel.speed;
 
     if (vel.vx === 0 && vel.vy === 0) continue;
 
@@ -18,8 +21,8 @@ export function movementSystem(world: World, deltaMS: number) {
       const nx = vel.vx / length;
       const ny = vel.vy / length;
 
-      pos.x += nx * vel.speed * dt;
-      pos.y += ny * vel.speed * dt;
+      pos.x += nx * speed * dt;
+      pos.y += ny * speed * dt;
     }
   }
 }

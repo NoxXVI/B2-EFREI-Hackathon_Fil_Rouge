@@ -1,69 +1,120 @@
-// MapData.ts — génération de maps (biomes) + transitions par niveau.
+// MapData.ts — génération de maps (biomes) + progression par level
 
 export const MAP_TILE_SIZE = 16;
+export const DEFAULT_MAP_COLS = 200;
+export const DEFAULT_MAP_ROWS = 160;
 
-// 0 = vide, 1 = mur/obstacle, 2 = sol
 export const TILE_EMPTY = 0 as const;
 export const TILE_WALL = 1 as const;
 export const TILE_FLOOR = 2 as const;
 export const TILE_TREE = 3 as const;
 export const TILE_BUSH = 4 as const;
+export const TILE_PILLAR = 5 as const;
+export const TILE_STATUE = 6 as const;
+export const TILE_LAVA = 7 as const;
+export const TILE_RUBBLE = 8 as const;
+export const TILE_CARPET = 9 as const;
 
 export type Tile =
   | typeof TILE_EMPTY
   | typeof TILE_WALL
   | typeof TILE_FLOOR
   | typeof TILE_TREE
-  | typeof TILE_BUSH;
+  | typeof TILE_BUSH
+  | typeof TILE_PILLAR
+  | typeof TILE_STATUE
+  | typeof TILE_LAVA
+  | typeof TILE_RUBBLE
+  | typeof TILE_CARPET;
 
-export type MapBiome = "forest" | "ice" | "dungeon" | "lava";
-export type MapId = "forest_1" | "forest_2" | "ice_1" | "dungeon_1" | "lava_1";
+export type MapTheme =
+  | "forest"
+  | "fairy_forest"
+  | "dungeon"
+  | "kings_hall"
+  | "castle_courtyard"
+  | "battlefield"
+  | "rocky_lava"
+  | "volcanic";
 
-export interface MapData {
-  id: MapId;
-  biome: MapBiome;
+export interface MapMeta {
   name: string;
+  description: string;
+}
+
+export interface GeneratedMap extends MapMeta {
+  theme: MapTheme;
   cols: number;
   rows: number;
   tileSize: number;
-  grid: Tile[][];
+  grid: number[][];
   wallRects: [number, number, number, number][];
   playerSpawn: [number, number];
   enemySpawns: [number, number][];
-  backgroundColor: number;
 }
 
-export const DEFAULT_MAP_ID: MapId = "forest_1";
+const BASE_SEED = 1337;
 
-export const MAP_LEVEL_TARGETS: Array<{ level: number; mapId: MapId }> = [
-  { level: 1, mapId: "forest_1" },
-  { level: 10, mapId: "forest_2" },
-  { level: 15, mapId: "ice_1" },
-  { level: 20, mapId: "dungeon_1" },
-  { level: 25, mapId: "lava_1" },
-];
+export function getMapThemeForLevel(level: number): MapTheme {
+  const safeLevel = Math.max(1, Math.floor(level));
+  if (safeLevel >= 50) return "volcanic";
+  if (safeLevel >= 40) return "rocky_lava";
+  if (safeLevel >= 35) return "battlefield";
+  if (safeLevel >= 25) return "castle_courtyard";
+  if (safeLevel >= 20) return "kings_hall";
+  if (safeLevel >= 10) return "dungeon";
+  if (safeLevel >= 5) return "fairy_forest";
+  return "forest";
+}
 
-export function getMapDisplayName(mapId: MapId): string {
-  switch (mapId) {
-    case "forest_1":
-      return "Forêt";
-    case "forest_2":
-      return "Forêt profonde";
-    case "ice_1":
-      return "Glacier";
-    case "dungeon_1":
-      return "Donjon";
-    case "lava_1":
-      return "Lave";
+export function getMapMeta(theme: MapTheme): MapMeta {
+  switch (theme) {
+    case "forest":
+      return { name: "Forêt", description: "Une forêt dense et sauvage." };
+    case "fairy_forest":
+      return {
+        name: "Forêt féerique",
+        description: "Une clairière enchantée digne d’un conte de fées.",
+      };
+    case "dungeon":
+      return {
+        name: "Donjon",
+        description: "Couloirs sombres et salles humides.",
+      };
+    case "kings_hall":
+      return {
+        name: "Salle du roi",
+        description: "Un grand hall royal, marbre et tapis écarlate.",
+      };
+    case "castle_courtyard":
+      return {
+        name: "Cour du château",
+        description: "Une cour ouverte, pavés, haies et fontaine.",
+      };
+    case "battlefield":
+      return {
+        name: "Champ de bataille",
+        description: "Terrain boueux, débris et barricades.",
+      };
+    case "rocky_lava":
+      return {
+        name: "Zone rocheuse",
+        description: "Rochers noirs et quelques poches de lave.",
+      };
+    case "volcanic":
+      return {
+        name: "Volcan",
+        description: "Une fournaise volcanique: la lave est partout.",
+      };
   }
 }
 
-export function getTargetMapIdForLevel(level: number): MapId {
-  let current = DEFAULT_MAP_ID;
-  for (const step of MAP_LEVEL_TARGETS) {
-    if (level >= step.level) current = step.mapId;
-  }
-  return current;
+export function isWalkableTile(value: number): boolean {
+  return value === TILE_FLOOR || value === TILE_CARPET;
+}
+
+function isWallTile(value: number): boolean {
+  return value !== TILE_EMPTY && !isWalkableTile(value);
 }
 
 function seededRand01(x: number, y: number, seed: number): number {
@@ -74,15 +125,29 @@ function seededRand01(x: number, y: number, seed: number): number {
 }
 
 function clamp(n: number, min: number, max: number): number {
-  return Math.max(min, Math.min(n, max));
+  return Math.max(min, Math.min(max, n));
 }
 
-function randInt(seed: number, a: number, b: number, min: number, max: number) {
-  const r = seededRand01(a, b, seed);
-  return min + Math.floor(r * (max - min + 1));
+function themeHash(theme: MapTheme): number {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < theme.length; i++) {
+    h ^= theme.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h;
 }
 
-function clearCircle(grid: Tile[][], cx: number, cy: number, radius: number) {
+function seedForTheme(theme: MapTheme, seed: number): number {
+  return (seed + themeHash(theme)) >>> 0;
+}
+
+function clearCircleTo(
+  grid: Tile[][],
+  cx: number,
+  cy: number,
+  radius: number,
+  tile: Tile,
+) {
   const r2 = radius * radius;
   for (let y = cy - radius; y <= cy + radius; y++) {
     for (let x = cx - radius; x <= cx + radius; x++) {
@@ -90,7 +155,7 @@ function clearCircle(grid: Tile[][], cx: number, cy: number, radius: number) {
       if (x <= 0 || x >= grid[0].length - 1) continue;
       const dx = x - cx;
       const dy = y - cy;
-      if (dx * dx + dy * dy <= r2) grid[y][x] = TILE_FLOOR;
+      if (dx * dx + dy * dy <= r2) grid[y][x] = tile;
     }
   }
 }
@@ -102,25 +167,25 @@ function carveTrail(
   dirX: number,
   dirY: number,
   seed: number,
-  trailRadius = 2,
+  tile: Tile = TILE_FLOOR,
 ) {
   let x = startX;
   let y = startY;
   const cols = grid[0].length;
   const rows = grid.length;
+  const trailRadius = 2;
 
   for (let step = 0; step < cols + rows; step++) {
     for (let oy = -trailRadius; oy <= trailRadius; oy++) {
       for (let ox = -trailRadius; ox <= trailRadius; ox++) {
         const tx = clamp(x + ox, 1, cols - 2);
         const ty = clamp(y + oy, 1, rows - 2);
-        grid[ty][tx] = TILE_FLOOR;
+        grid[ty][tx] = tile;
       }
     }
 
     if (x <= 1 || x >= cols - 2 || y <= 1 || y >= rows - 2) break;
 
-    // petite variation pour un chemin plus "naturel"
     const jitter = seededRand01(step, x + y, seed);
     const j = jitter < 0.33 ? -1 : jitter < 0.66 ? 0 : 1;
 
@@ -134,185 +199,218 @@ function carveTrail(
   }
 }
 
-type Cluster = { cx: number; cy: number; r: number };
+type Rect = { x: number; y: number; w: number; h: number };
 
-function generateClusterBiomeGrid(options: {
+function carveRect(grid: Tile[][], rect: Rect, tile: Tile = TILE_FLOOR) {
+  const rows = grid.length;
+  const cols = grid[0].length;
+  for (let y = rect.y; y < rect.y + rect.h; y++) {
+    if (y <= 0 || y >= rows - 1) continue;
+    for (let x = rect.x; x < rect.x + rect.w; x++) {
+      if (x <= 0 || x >= cols - 1) continue;
+      grid[y][x] = tile;
+    }
+  }
+}
+
+function stampCluster(
+  grid: Tile[][],
+  cx: number,
+  cy: number,
+  r: number,
+  tileType: Tile,
+  stampSeed: number,
+) {
+  const rows = grid.length;
+  const cols = grid[0].length;
+  const scaleX = 0.85 + seededRand01(cx, cy, stampSeed) * 0.3;
+  const scaleY = 0.85 + seededRand01(cx, cy, stampSeed + 1) * 0.3;
+
+  for (let y = cy - r - 1; y <= cy + r + 1; y++) {
+    if (y <= 0 || y >= rows - 1) continue;
+    for (let x = cx - r - 1; x <= cx + r + 1; x++) {
+      if (x <= 0 || x >= cols - 1) continue;
+
+      const dx = (x - cx) / scaleX;
+      const dy = (y - cy) / scaleY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const noise = 0.85 + seededRand01(x, y, stampSeed + 2) * 0.3;
+
+      if (dist <= r * noise) {
+        grid[y][x] = tileType;
+      }
+    }
+  }
+}
+
+function placeClusters(options: {
+  grid: Tile[][];
+  count: number;
+  tileType: Tile;
+  rMin: number;
+  rMax: number;
+  seed: number;
+  clusters?: Array<{ cx: number; cy: number; r: number }>;
+  clusterGap?: number;
+}) {
+  const { grid, count, tileType, rMin, rMax, seed } = options;
+  const rows = grid.length;
+  const cols = grid[0].length;
+  const clusters = options.clusters ?? [];
+  const clusterGap = options.clusterGap ?? 2;
+
+  for (let i = 0; i < count; i++) {
+    for (let attempt = 0; attempt < 80; attempt++) {
+      const rr =
+        rMin + Math.floor(seededRand01(i, attempt, seed) * (rMax - rMin + 1));
+      const cx =
+        1 +
+        rr +
+        Math.floor(
+          seededRand01(i, attempt + 31, seed + 1) *
+            Math.max(1, cols - 2 - rr * 2),
+        );
+      const cy =
+        1 +
+        rr +
+        Math.floor(
+          seededRand01(i, attempt + 79, seed + 2) *
+            Math.max(1, rows - 2 - rr * 2),
+        );
+
+      let ok = true;
+      for (const c of clusters) {
+        const dx = cx - c.cx;
+        const dy = cy - c.cy;
+        const minDist = rr + c.r + clusterGap;
+        if (dx * dx + dy * dy < minDist * minDist) {
+          ok = false;
+          break;
+        }
+      }
+      if (!ok) continue;
+
+      stampCluster(grid, cx, cy, rr, tileType, seed + i * 13);
+      clusters.push({ cx, cy, r: rr });
+      break;
+    }
+  }
+}
+
+function generateForestLikeGrid(params: {
   cols: number;
   rows: number;
   seed: number;
-  borderTile: typeof TILE_WALL | typeof TILE_TREE | typeof TILE_BUSH;
-  clusterGap: number;
-  clusters: Array<{
-    count: number;
-    tileType: typeof TILE_WALL | typeof TILE_TREE | typeof TILE_BUSH;
-    rMin: number;
-    rMax: number;
-    seedOffset: number;
-  }>;
-  clearingCount: number;
-  clearingRadiusMin: number;
-  clearingRadiusMax: number;
-  trailRadius: number;
-}) {
-  const { cols, rows } = options;
-
+  borderTile: Tile;
+  rockFactor: number;
+  treeFactor: number;
+  bushFactor: number;
+  clearingFactor: number;
+  extraObstacleTile?: Tile;
+  extraObstacleFactor?: number;
+}): Tile[][] {
+  const { cols, rows, seed } = params;
   const grid: Tile[][] = Array.from({ length: rows }, () =>
     Array.from({ length: cols }, () => TILE_FLOOR),
   );
 
-  const setBorder = (tile: typeof options.borderTile) => {
-    for (let x = 0; x < cols; x++) {
-      grid[0][x] = tile;
-      grid[rows - 1][x] = tile;
-    }
-    for (let y = 0; y < rows; y++) {
-      grid[y][0] = tile;
-      grid[y][cols - 1] = tile;
-    }
-  };
+  // Bordures bloquantes
+  for (let x = 0; x < cols; x++) {
+    grid[0][x] = params.borderTile;
+    grid[rows - 1][x] = params.borderTile;
+  }
+  for (let y = 0; y < rows; y++) {
+    grid[y][0] = params.borderTile;
+    grid[y][cols - 1] = params.borderTile;
+  }
 
-  setBorder(options.borderTile);
+  const area = cols * rows;
+  const clusters: Array<{ cx: number; cy: number; r: number }> = [];
 
-  const placed: Cluster[] = [];
+  const rockCount = Math.max(14, Math.floor((area / 360) * params.rockFactor));
+  const treeCount = Math.max(18, Math.floor((area / 320) * params.treeFactor));
+  const bushCount = Math.max(12, Math.floor((area / 520) * params.bushFactor));
 
-  const stampCluster = (
-    cx: number,
-    cy: number,
-    r: number,
-    tileType: typeof TILE_WALL | typeof TILE_TREE | typeof TILE_BUSH,
-    stampSeed: number,
-  ) => {
-    const scaleX = 0.85 + seededRand01(cx, cy, stampSeed) * 0.3;
-    const scaleY = 0.85 + seededRand01(cx, cy, stampSeed + 1) * 0.3;
+  placeClusters({
+    grid,
+    count: rockCount,
+    tileType: TILE_WALL,
+    rMin: 1,
+    rMax: 3,
+    seed: seed + 11000,
+    clusters,
+    clusterGap: 2,
+  });
+  placeClusters({
+    grid,
+    count: treeCount,
+    tileType: TILE_TREE,
+    rMin: 1,
+    rMax: 3,
+    seed: seed + 12000,
+    clusters,
+    clusterGap: 2,
+  });
+  placeClusters({
+    grid,
+    count: bushCount,
+    tileType: TILE_BUSH,
+    rMin: 1,
+    rMax: 2,
+    seed: seed + 13000,
+    clusters,
+    clusterGap: 2,
+  });
 
-    for (let y = cy - r - 1; y <= cy + r + 1; y++) {
-      if (y <= 0 || y >= rows - 1) continue;
-      for (let x = cx - r - 1; x <= cx + r + 1; x++) {
-        if (x <= 0 || x >= cols - 1) continue;
-
-        const dx = (x - cx) / scaleX;
-        const dy = (y - cy) / scaleY;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        const noise = 0.85 + seededRand01(x, y, stampSeed + 2) * 0.3;
-
-        if (dist <= r * noise) {
-          grid[y][x] = tileType;
-        }
-      }
-    }
-  };
-
-  const placeClusters = (spec: (typeof options.clusters)[number]) => {
-    const { count, tileType, rMin, rMax, seedOffset } = spec;
-    for (let i = 0; i < count; i++) {
-      for (let attempt = 0; attempt < 80; attempt++) {
-        const rr =
-          rMin +
-          Math.floor(seededRand01(i, attempt, seedOffset) * (rMax - rMin + 1));
-
-        const cx =
-          1 +
-          rr +
-          Math.floor(
-            seededRand01(i, attempt + 31, seedOffset + 1) *
-              Math.max(1, cols - 2 - rr * 2),
-          );
-        const cy =
-          1 +
-          rr +
-          Math.floor(
-            seededRand01(i, attempt + 79, seedOffset + 2) *
-              Math.max(1, rows - 2 - rr * 2),
-          );
-
-        let ok = true;
-        for (const c of placed) {
-          const dx = cx - c.cx;
-          const dy = cy - c.cy;
-          const minDist = rr + c.r + options.clusterGap;
-          if (dx * dx + dy * dy < minDist * minDist) {
-            ok = false;
-            break;
-          }
-        }
-        if (!ok) continue;
-
-        stampCluster(cx, cy, rr, tileType, seedOffset + i * 13);
-        placed.push({ cx, cy, r: rr });
-        break;
-      }
-    }
-  };
-
-  for (const spec of options.clusters) {
-    placeClusters(spec);
+  if (params.extraObstacleTile && params.extraObstacleFactor) {
+    const extraCount = Math.max(
+      8,
+      Math.floor((area / 700) * params.extraObstacleFactor),
+    );
+    placeClusters({
+      grid,
+      count: extraCount,
+      tileType: params.extraObstacleTile,
+      rMin: 1,
+      rMax: 2,
+      seed: seed + 14000,
+      clusters,
+      clusterGap: 2,
+    });
   }
 
   // Clairières
-  for (let i = 0; i < options.clearingCount; i++) {
+  const clearingCount = Math.max(
+    5,
+    Math.floor((area / 700) * params.clearingFactor),
+  );
+  for (let i = 0; i < clearingCount; i++) {
     const cx =
-      2 +
-      Math.floor(
-        seededRand01(i, 3, options.seed + 3000) * Math.max(1, cols - 4),
-      );
+      2 + Math.floor(seededRand01(i, 3, seed + 3000) * Math.max(1, cols - 4));
     const cy =
-      2 +
-      Math.floor(
-        seededRand01(i, 4, options.seed + 3000) * Math.max(1, rows - 4),
-      );
-    const radius = randInt(
-      options.seed + 3000,
-      i,
-      5,
-      options.clearingRadiusMin,
-      options.clearingRadiusMax,
-    );
-    clearCircle(grid, cx, cy, radius);
+      2 + Math.floor(seededRand01(i, 4, seed + 3000) * Math.max(1, rows - 4));
+    const radius = 4 + Math.floor(seededRand01(i, 5, seed + 3000) * 5);
+    clearCircleTo(grid, cx, cy, radius, TILE_FLOOR);
   }
 
-  // Chemins (du centre vers les bords)
+  // Chemins depuis le centre
   const centerX = Math.floor(cols / 2);
   const centerY = Math.floor(rows / 2);
-  clearCircle(grid, centerX, centerY, 7);
-  carveTrail(
-    grid,
-    centerX,
-    centerY,
-    1,
-    0,
-    options.seed + 4000,
-    options.trailRadius,
-  );
-  carveTrail(
-    grid,
-    centerX,
-    centerY,
-    -1,
-    0,
-    options.seed + 4001,
-    options.trailRadius,
-  );
-  carveTrail(
-    grid,
-    centerX,
-    centerY,
-    0,
-    1,
-    options.seed + 4002,
-    options.trailRadius,
-  );
-  carveTrail(
-    grid,
-    centerX,
-    centerY,
-    0,
-    -1,
-    options.seed + 4003,
-    options.trailRadius,
-  );
+  clearCircleTo(grid, centerX, centerY, 7, TILE_FLOOR);
+  carveTrail(grid, centerX, centerY, 1, 0, seed + 4000, TILE_FLOOR);
+  carveTrail(grid, centerX, centerY, -1, 0, seed + 4001, TILE_FLOOR);
+  carveTrail(grid, centerX, centerY, 0, 1, seed + 4002, TILE_FLOOR);
+  carveTrail(grid, centerX, centerY, 0, -1, seed + 4003, TILE_FLOOR);
 
-  // Re-bordure (au cas où un carving aurait touché les bords)
-  setBorder(options.borderTile);
+  // Re-bordure
+  for (let x = 0; x < cols; x++) {
+    grid[0][x] = params.borderTile;
+    grid[rows - 1][x] = params.borderTile;
+  }
+  for (let y = 0; y < rows; y++) {
+    grid[y][0] = params.borderTile;
+    grid[y][cols - 1] = params.borderTile;
+  }
 
   return grid;
 }
@@ -321,234 +419,158 @@ function generateForestGrid(
   cols: number,
   rows: number,
   seed: number,
-  variant: "normal" | "deep",
-) {
-  const area = cols * rows;
-  const density = variant === "deep" ? 1.2 : 1;
-
-  const rockCount = Math.max(18, Math.floor((area / 360) * density));
-  const treeCount = Math.max(22, Math.floor((area / 320) * density));
-  const bushCount = Math.max(14, Math.floor((area / 520) * density));
-
-  const clearingCount = Math.max(6, Math.floor((area / 700) * (2 - density)));
-
-  return generateClusterBiomeGrid({
+): Tile[][] {
+  return generateForestLikeGrid({
     cols,
     rows,
     seed,
     borderTile: TILE_TREE,
-    clusterGap: variant === "deep" ? 1 : 2,
-    clusters: [
-      {
-        count: rockCount,
-        tileType: TILE_WALL,
-        rMin: 1,
-        rMax: 3,
-        seedOffset: seed + 11000,
-      },
-      {
-        count: treeCount,
-        tileType: TILE_TREE,
-        rMin: 1,
-        rMax: 3,
-        seedOffset: seed + 12000,
-      },
-      {
-        count: bushCount,
-        tileType: TILE_BUSH,
-        rMin: 1,
-        rMax: 2,
-        seedOffset: seed + 13000,
-      },
-    ],
-    clearingCount,
-    clearingRadiusMin: 4,
-    clearingRadiusMax: 8,
-    trailRadius: 2,
+    rockFactor: 1,
+    treeFactor: 1,
+    bushFactor: 1,
+    clearingFactor: 1,
   });
 }
 
-function generateIceGrid(cols: number, rows: number, seed: number) {
-  const area = cols * rows;
-
-  const rockCount = Math.max(12, Math.floor(area / 520));
-  const pillarCount = Math.max(10, Math.floor(area / 700));
-  const snowCount = Math.max(10, Math.floor(area / 650));
-  const clearingCount = Math.max(8, Math.floor(area / 600));
-
-  return generateClusterBiomeGrid({
+function generateFairyForestGrid(
+  cols: number,
+  rows: number,
+  seed: number,
+): Tile[][] {
+  return generateForestLikeGrid({
     cols,
     rows,
     seed,
-    borderTile: TILE_WALL,
-    clusterGap: 3,
-    clusters: [
-      {
-        count: rockCount,
-        tileType: TILE_WALL,
-        rMin: 1,
-        rMax: 3,
-        seedOffset: seed + 21000,
-      },
-      {
-        count: pillarCount,
-        tileType: TILE_TREE,
-        rMin: 1,
-        rMax: 2,
-        seedOffset: seed + 22000,
-      },
-      {
-        count: snowCount,
-        tileType: TILE_BUSH,
-        rMin: 1,
-        rMax: 2,
-        seedOffset: seed + 23000,
-      },
-    ],
-    clearingCount,
-    clearingRadiusMin: 5,
-    clearingRadiusMax: 10,
-    trailRadius: 3,
+    borderTile: TILE_TREE,
+    rockFactor: 0.8,
+    treeFactor: 0.9,
+    bushFactor: 1.35,
+    clearingFactor: 1.4,
+    extraObstacleTile: TILE_STATUE,
+    extraObstacleFactor: 0.55,
   });
 }
 
-type Room = {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  cx: number;
-  cy: number;
-};
-
-function carveRect(
-  grid: Tile[][],
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  tile: Tile,
-) {
-  const rows = grid.length;
-  const cols = grid[0].length;
-  for (let ty = y; ty < y + h; ty++) {
-    if (ty <= 0 || ty >= rows - 1) continue;
-    for (let tx = x; tx < x + w; tx++) {
-      if (tx <= 0 || tx >= cols - 1) continue;
-      grid[ty][tx] = tile;
-    }
-  }
-}
-
-function carveCorridor(
-  grid: Tile[][],
-  x1: number,
-  y1: number,
-  x2: number,
-  y2: number,
-  width: number,
-) {
-  const half = Math.max(0, Math.floor(width / 2));
-
-  const carvePoint = (x: number, y: number) => {
-    for (let oy = -half; oy <= half; oy++) {
-      for (let ox = -half; ox <= half; ox++) {
-        const tx = clamp(x + ox, 1, grid[0].length - 2);
-        const ty = clamp(y + oy, 1, grid.length - 2);
-        grid[ty][tx] = TILE_FLOOR;
-      }
-    }
-  };
-
-  let cx = x1;
-  let cy = y1;
-  const dx = x2 > x1 ? 1 : -1;
-  const dy = y2 > y1 ? 1 : -1;
-
-  while (cx !== x2) {
-    carvePoint(cx, cy);
-    cx += dx;
-  }
-  while (cy !== y2) {
-    carvePoint(cx, cy);
-    cy += dy;
-  }
-  carvePoint(cx, cy);
-}
-
-function generateDungeonGrid(cols: number, rows: number, seed: number) {
+function generateDungeonGrid(
+  cols: number,
+  rows: number,
+  seed: number,
+): Tile[][] {
   const grid: Tile[][] = Array.from({ length: rows }, () =>
     Array.from({ length: cols }, () => TILE_WALL),
   );
 
-  const rooms: Room[] = [];
-  const roomCount = 12;
-  const margin = 2;
+  const rooms: Array<{
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    cx: number;
+    cy: number;
+  }> = [];
+  const roomCount = 9;
+  const gap = 2;
 
   for (let i = 0; i < roomCount; i++) {
     for (let attempt = 0; attempt < 60; attempt++) {
-      const w = randInt(seed + 7000, i, attempt, 7, 14);
-      const h = randInt(seed + 7100, i, attempt, 6, 12);
-      const x = randInt(seed + 7200, i, attempt, 2, cols - w - 3);
-      const y = randInt(seed + 7300, i, attempt, 2, rows - h - 3);
+      const w = 10 + Math.floor(seededRand01(i, attempt, seed + 10) * 16); // 10..25
+      const h = 8 + Math.floor(seededRand01(i, attempt, seed + 11) * 14); // 8..21
+      const x =
+        2 +
+        Math.floor(
+          seededRand01(i, attempt, seed + 12) * Math.max(1, cols - w - 4),
+        );
+      const y =
+        2 +
+        Math.floor(
+          seededRand01(i, attempt, seed + 13) * Math.max(1, rows - h - 4),
+        );
 
-      const x2 = x + w;
-      const y2 = y + h;
-      let overlaps = false;
+      const rect: Rect = { x, y, w, h };
+
+      let ok = true;
       for (const r of rooms) {
-        const rx1 = r.x - margin;
-        const ry1 = r.y - margin;
-        const rx2 = r.x + r.w + margin;
-        const ry2 = r.y + r.h + margin;
-        if (x < rx2 && x2 > rx1 && y < ry2 && y2 > ry1) {
-          overlaps = true;
+        const ax1 = rect.x - gap;
+        const ay1 = rect.y - gap;
+        const ax2 = rect.x + rect.w + gap;
+        const ay2 = rect.y + rect.h + gap;
+        const bx1 = r.x;
+        const by1 = r.y;
+        const bx2 = r.x + r.w;
+        const by2 = r.y + r.h;
+        const overlap = ax1 < bx2 && ax2 > bx1 && ay1 < by2 && ay2 > by1;
+        if (overlap) {
+          ok = false;
           break;
         }
       }
-      if (overlaps) continue;
+      if (!ok) continue;
 
-      carveRect(grid, x, y, w, h, TILE_FLOOR);
+      carveRect(grid, rect, TILE_FLOOR);
       rooms.push({
-        x,
-        y,
-        w,
-        h,
-        cx: Math.floor(x + w / 2),
-        cy: Math.floor(y + h / 2),
+        ...rect,
+        cx: x + Math.floor(w / 2),
+        cy: y + Math.floor(h / 2),
       });
       break;
     }
   }
 
-  rooms.sort((a, b) => a.cx - b.cx);
+  // Au moins une grande salle centrale
+  const centerRoom: Rect = {
+    x: Math.floor(cols / 2) - 18,
+    y: Math.floor(rows / 2) - 14,
+    w: 36,
+    h: 28,
+  };
+  carveRect(grid, centerRoom, TILE_FLOOR);
+  rooms.push({
+    ...centerRoom,
+    cx: centerRoom.x + Math.floor(centerRoom.w / 2),
+    cy: centerRoom.y + Math.floor(centerRoom.h / 2),
+  });
+
+  const corridorHalf = 1;
+  const carveCorridor = (x1: number, y1: number, x2: number, y2: number) => {
+    let x = x1;
+    let y = y1;
+    const stepX = x2 >= x1 ? 1 : -1;
+    const stepY = y2 >= y1 ? 1 : -1;
+
+    while (x !== x2) {
+      for (let oy = -corridorHalf; oy <= corridorHalf; oy++) {
+        const ty = clamp(y + oy, 1, rows - 2);
+        grid[ty][x] = TILE_FLOOR;
+      }
+      x += stepX;
+    }
+    while (y !== y2) {
+      for (let ox = -corridorHalf; ox <= corridorHalf; ox++) {
+        const tx = clamp(x + ox, 1, cols - 2);
+        grid[y][tx] = TILE_FLOOR;
+      }
+      y += stepY;
+    }
+  };
+
+  // Connecte les rooms en chaîne
   for (let i = 1; i < rooms.length; i++) {
-    const a = rooms[i - 1];
-    const b = rooms[i];
-    const firstHorizontal = seededRand01(a.cx, a.cy, seed + i) < 0.5;
-    if (firstHorizontal) {
-      carveCorridor(grid, a.cx, a.cy, b.cx, a.cy, 2);
-      carveCorridor(grid, b.cx, a.cy, b.cx, b.cy, 2);
-    } else {
-      carveCorridor(grid, a.cx, a.cy, a.cx, b.cy, 2);
-      carveCorridor(grid, a.cx, b.cy, b.cx, b.cy, 2);
+    carveCorridor(rooms[i - 1].cx, rooms[i - 1].cy, rooms[i].cx, rooms[i].cy);
+  }
+
+  // Piliers dans les grandes rooms
+  for (const r of rooms) {
+    if (r.w * r.h < 300) continue;
+    for (let y = r.y + 3; y < r.y + r.h - 3; y += 6) {
+      for (let x = r.x + 3; x < r.x + r.w - 3; x += 6) {
+        const roll = seededRand01(x, y, seed + 9000);
+        if (roll < 0.55) continue;
+        grid[y][x] = TILE_PILLAR;
+      }
     }
   }
 
-  // Piliers / caisses (obstacles variés) dans certaines salles
-  for (let i = 0; i < rooms.length; i++) {
-    const r = rooms[i];
-    const decorations = randInt(seed + 8000, r.cx, r.cy, 1, 4);
-    for (let j = 0; j < decorations; j++) {
-      const tx = randInt(seed + 8100, i, j, r.x + 2, r.x + r.w - 3);
-      const ty = randInt(seed + 8200, i, j, r.y + 2, r.y + r.h - 3);
-      const roll = seededRand01(tx, ty, seed + 9000);
-      if (roll < 0.35)
-        grid[ty][tx] = TILE_TREE; // pilier
-      else if (roll < 0.6) grid[ty][tx] = TILE_BUSH; // caisse / débris
-    }
-  }
-
-  // Bordures
+  // Bordures (murs)
   for (let x = 0; x < cols; x++) {
     grid[0][x] = TILE_WALL;
     grid[rows - 1][x] = TILE_WALL;
@@ -561,51 +583,293 @@ function generateDungeonGrid(cols: number, rows: number, seed: number) {
   return grid;
 }
 
-function generateLavaGrid(cols: number, rows: number, seed: number) {
-  const area = cols * rows;
-  const rockCount = Math.max(18, Math.floor(area / 300));
-  const basaltCount = Math.max(14, Math.floor(area / 420));
-  const rubbleCount = Math.max(14, Math.floor(area / 450));
-  const clearingCount = Math.max(6, Math.floor(area / 800));
+function generateKingsHallGrid(
+  cols: number,
+  rows: number,
+  seed: number,
+): Tile[][] {
+  const grid: Tile[][] = Array.from({ length: rows }, () =>
+    Array.from({ length: cols }, () => TILE_WALL),
+  );
 
-  return generateClusterBiomeGrid({
-    cols,
-    rows,
-    seed,
-    borderTile: TILE_WALL,
-    clusterGap: 2,
-    clusters: [
-      {
-        count: rockCount,
-        tileType: TILE_WALL,
-        rMin: 1,
-        rMax: 4,
-        seedOffset: seed + 31000,
-      },
-      {
-        count: basaltCount,
-        tileType: TILE_TREE,
-        rMin: 1,
-        rMax: 3,
-        seedOffset: seed + 32000,
-      },
-      {
-        count: rubbleCount,
-        tileType: TILE_BUSH,
-        rMin: 1,
-        rMax: 2,
-        seedOffset: seed + 33000,
-      },
-    ],
-    clearingCount,
-    clearingRadiusMin: 4,
-    clearingRadiusMax: 7,
-    trailRadius: 2,
+  // Grand hall
+  const marginX = 8;
+  const marginY = 10;
+  carveRect(
+    grid,
+    {
+      x: marginX,
+      y: marginY,
+      w: cols - marginX * 2,
+      h: rows - marginY * 2,
+    },
+    TILE_FLOOR,
+  );
+
+  // Tapis central (carpet)
+  const carpetW = 10;
+  const cx = Math.floor(cols / 2) - Math.floor(carpetW / 2);
+  for (let y = marginY; y < rows - marginY; y++) {
+    for (let x = cx; x < cx + carpetW; x++) {
+      if (x <= 0 || x >= cols - 1) continue;
+      grid[y][x] = TILE_CARPET;
+    }
+  }
+
+  // Piliers de chaque côté
+  for (let y = marginY + 6; y < rows - marginY - 6; y += 10) {
+    for (const x of [marginX + 5, cols - marginX - 6]) {
+      grid[y][x] = TILE_PILLAR;
+      grid[y][x + 1] = TILE_PILLAR;
+    }
+  }
+
+  // Statues près du "trône"
+  const topY = marginY + 3;
+  grid[topY][cx - 6] = TILE_STATUE;
+  grid[topY][cx + carpetW + 5] = TILE_STATUE;
+
+  // Laisse une zone de spawn confortable au centre
+  clearCircleTo(
+    grid,
+    Math.floor(cols / 2),
+    Math.floor(rows / 2),
+    6,
+    TILE_FLOOR,
+  );
+
+  // Bordures
+  for (let x = 0; x < cols; x++) {
+    grid[0][x] = TILE_WALL;
+    grid[rows - 1][x] = TILE_WALL;
+  }
+  for (let y = 0; y < rows; y++) {
+    grid[y][0] = TILE_WALL;
+    grid[y][cols - 1] = TILE_WALL;
+  }
+
+  // Petite variation: quelques débris
+  placeClusters({
+    grid,
+    count: Math.max(8, Math.floor((cols * rows) / 1600)),
+    tileType: TILE_RUBBLE,
+    rMin: 1,
+    rMax: 2,
+    seed: seed + 16000,
+    clusters: [],
+    clusterGap: 3,
   });
+
+  return grid;
 }
 
-function isWallTile(value: number): boolean {
-  return value !== TILE_FLOOR && value !== TILE_EMPTY;
+function generateCourtyardGrid(
+  cols: number,
+  rows: number,
+  seed: number,
+): Tile[][] {
+  const grid: Tile[][] = Array.from({ length: rows }, () =>
+    Array.from({ length: cols }, () => TILE_FLOOR),
+  );
+
+  // Bordures en murs
+  for (let x = 0; x < cols; x++) {
+    grid[0][x] = TILE_WALL;
+    grid[rows - 1][x] = TILE_WALL;
+  }
+  for (let y = 0; y < rows; y++) {
+    grid[y][0] = TILE_WALL;
+    grid[y][cols - 1] = TILE_WALL;
+  }
+
+  // Fontaine centrale (statues)
+  const centerX = Math.floor(cols / 2);
+  const centerY = Math.floor(rows / 2);
+  for (let i = 0; i < 10; i++) {
+    const ang = (i / 10) * Math.PI * 2;
+    const x = centerX + Math.round(Math.cos(ang) * 5);
+    const y = centerY + Math.round(Math.sin(ang) * 5);
+    if (x > 1 && x < cols - 2 && y > 1 && y < rows - 2)
+      grid[y][x] = TILE_STATUE;
+  }
+  clearCircleTo(grid, centerX, centerY, 3, TILE_FLOOR);
+
+  // Haies (buissons) et quelques arbres pour structurer
+  placeClusters({
+    grid,
+    count: Math.max(28, Math.floor((cols * rows) / 420)),
+    tileType: TILE_BUSH,
+    rMin: 1,
+    rMax: 3,
+    seed: seed + 17000,
+    clusters: [],
+    clusterGap: 2,
+  });
+  placeClusters({
+    grid,
+    count: Math.max(18, Math.floor((cols * rows) / 520)),
+    tileType: TILE_TREE,
+    rMin: 1,
+    rMax: 3,
+    seed: seed + 17100,
+    clusters: [],
+    clusterGap: 2,
+  });
+
+  // Allées principales (croix)
+  carveTrail(grid, centerX, centerY, 1, 0, seed + 17200, TILE_FLOOR);
+  carveTrail(grid, centerX, centerY, -1, 0, seed + 17201, TILE_FLOOR);
+  carveTrail(grid, centerX, centerY, 0, 1, seed + 17202, TILE_FLOOR);
+  carveTrail(grid, centerX, centerY, 0, -1, seed + 17203, TILE_FLOOR);
+  clearCircleTo(grid, centerX, centerY, 7, TILE_FLOOR);
+
+  return grid;
+}
+
+function generateBattlefieldGrid(
+  cols: number,
+  rows: number,
+  seed: number,
+): Tile[][] {
+  const grid: Tile[][] = Array.from({ length: rows }, () =>
+    Array.from({ length: cols }, () => TILE_FLOOR),
+  );
+
+  // Bordures en débris (empêche de sortir)
+  for (let x = 0; x < cols; x++) {
+    grid[0][x] = TILE_RUBBLE;
+    grid[rows - 1][x] = TILE_RUBBLE;
+  }
+  for (let y = 0; y < rows; y++) {
+    grid[y][0] = TILE_RUBBLE;
+    grid[y][cols - 1] = TILE_RUBBLE;
+  }
+
+  const area = cols * rows;
+  placeClusters({
+    grid,
+    count: Math.max(26, Math.floor(area / 420)),
+    tileType: TILE_RUBBLE,
+    rMin: 1,
+    rMax: 3,
+    seed: seed + 18000,
+    clusters: [],
+    clusterGap: 2,
+  });
+  placeClusters({
+    grid,
+    count: Math.max(14, Math.floor(area / 850)),
+    tileType: TILE_WALL,
+    rMin: 1,
+    rMax: 2,
+    seed: seed + 18100,
+    clusters: [],
+    clusterGap: 3,
+  });
+
+  // Quelques cratères (clairières)
+  const craterCount = Math.max(8, Math.floor(area / 900));
+  for (let i = 0; i < craterCount; i++) {
+    const cx =
+      2 + Math.floor(seededRand01(i, 1, seed + 18200) * Math.max(1, cols - 4));
+    const cy =
+      2 + Math.floor(seededRand01(i, 2, seed + 18200) * Math.max(1, rows - 4));
+    const radius = 3 + Math.floor(seededRand01(i, 3, seed + 18200) * 5);
+    clearCircleTo(grid, cx, cy, radius, TILE_FLOOR);
+  }
+
+  return grid;
+}
+
+function generateRockyLavaGrid(
+  cols: number,
+  rows: number,
+  seed: number,
+): Tile[][] {
+  const grid: Tile[][] = Array.from({ length: rows }, () =>
+    Array.from({ length: cols }, () => TILE_FLOOR),
+  );
+
+  // Bordures rocheuses
+  for (let x = 0; x < cols; x++) {
+    grid[0][x] = TILE_WALL;
+    grid[rows - 1][x] = TILE_WALL;
+  }
+  for (let y = 0; y < rows; y++) {
+    grid[y][0] = TILE_WALL;
+    grid[y][cols - 1] = TILE_WALL;
+  }
+
+  const area = cols * rows;
+  placeClusters({
+    grid,
+    count: Math.max(22, Math.floor(area / 520)),
+    tileType: TILE_WALL,
+    rMin: 1,
+    rMax: 3,
+    seed: seed + 19000,
+    clusters: [],
+    clusterGap: 2,
+  });
+  placeClusters({
+    grid,
+    count: Math.max(10, Math.floor(area / 1400)),
+    tileType: TILE_LAVA,
+    rMin: 2,
+    rMax: 4,
+    seed: seed + 19100,
+    clusters: [],
+    clusterGap: 3,
+  });
+
+  // Un couloir traversant pour éviter les maps "bloquées"
+  const centerX = Math.floor(cols / 2);
+  const centerY = Math.floor(rows / 2);
+  clearCircleTo(grid, centerX, centerY, 7, TILE_FLOOR);
+  carveTrail(grid, centerX, centerY, 1, 0, seed + 19200, TILE_FLOOR);
+  carveTrail(grid, centerX, centerY, -1, 0, seed + 19201, TILE_FLOOR);
+  carveTrail(grid, centerX, centerY, 0, 1, seed + 19202, TILE_FLOOR);
+  carveTrail(grid, centerX, centerY, 0, -1, seed + 19203, TILE_FLOOR);
+
+  return grid;
+}
+
+function generateVolcanicGrid(
+  cols: number,
+  rows: number,
+  seed: number,
+): Tile[][] {
+  const grid = generateRockyLavaGrid(cols, rows, seed + 2000);
+
+  const area = cols * rows;
+  // Plus de lave
+  placeClusters({
+    grid,
+    count: Math.max(16, Math.floor(area / 900)),
+    tileType: TILE_LAVA,
+    rMin: 2,
+    rMax: 6,
+    seed: seed + 20000,
+    clusters: [],
+    clusterGap: 3,
+  });
+
+  // Une "rivière" de lave (diagonale)
+  const startX = 2 + Math.floor(seededRand01(1, 1, seed + 20100) * (cols - 4));
+  const startY = 2 + Math.floor(seededRand01(2, 2, seed + 20100) * (rows - 4));
+  carveTrail(grid, startX, startY, 1, 1, seed + 20110, TILE_LAVA);
+  carveTrail(grid, startX, startY, 1, -1, seed + 20111, TILE_LAVA);
+
+  // Garantit un gros espace central jouable
+  clearCircleTo(
+    grid,
+    Math.floor(cols / 2),
+    Math.floor(rows / 2),
+    11,
+    TILE_FLOOR,
+  );
+
+  return grid;
 }
 
 function buildWallRects(
@@ -655,7 +919,7 @@ function buildWallRects(
   return rects;
 }
 
-function findNearestFloor(grid: Tile[][], startX: number, startY: number) {
+function findNearestWalkable(grid: Tile[][], startX: number, startY: number) {
   const cols = grid[0].length;
   const rows = grid.length;
 
@@ -663,7 +927,7 @@ function findNearestFloor(grid: Tile[][], startX: number, startY: number) {
     for (let y = startY - r; y <= startY + r; y++) {
       for (let x = startX - r; x <= startX + r; x++) {
         if (x <= 0 || x >= cols - 1 || y <= 0 || y >= rows - 1) continue;
-        if (grid[y][x] === TILE_FLOOR) return [x, y] as const;
+        if (isWalkableTile(grid[y][x])) return [x, y] as const;
       }
     }
   }
@@ -678,40 +942,37 @@ function toPixel(
   return [tileX * tileSize + tileSize / 2, tileY * tileSize + tileSize / 2];
 }
 
-function computeSpawnsAndWalls(
-  grid: Tile[][],
-  cols: number,
-  rows: number,
-  seed: number,
-) {
-  // Spawn joueur : proche du centre
-  const [playerTileX, playerTileY] = findNearestFloor(
+function buildSpawns(options: {
+  grid: Tile[][];
+  cols: number;
+  rows: number;
+  tileSize: number;
+  seed: number;
+}) {
+  const { grid, cols, rows, tileSize, seed } = options;
+
+  const [playerTileX, playerTileY] = findNearestWalkable(
     grid,
     Math.floor(cols / 2),
     Math.floor(rows / 2),
   );
-  clearCircle(grid, playerTileX, playerTileY, 3);
-  const playerSpawn: [number, number] = toPixel(
-    playerTileX,
-    playerTileY,
-    MAP_TILE_SIZE,
-  );
+  clearCircleTo(grid, playerTileX, playerTileY, 3, TILE_FLOOR);
+  const playerSpawn = toPixel(playerTileX, playerTileY, tileSize);
 
-  // Spawns ennemis : sur du sol, pas trop proche du joueur
   const enemySpawnTiles: [number, number][] = [];
   const used = new Set<string>([`${playerTileX},${playerTileY}`]);
-  const minDistTiles = Math.max(16, Math.floor(Math.min(cols, rows) * 0.2));
+  const minDistTiles = 18;
 
   for (let i = 0; i < 20; i++) {
     let chosen: [number, number] | null = null;
 
-    for (let attempt = 0; attempt < 900; attempt++) {
+    for (let attempt = 0; attempt < 800; attempt++) {
       const rx = seededRand01(i, attempt, seed + 5000);
       const ry = seededRand01(i, attempt + 999, seed + 5000);
       const x = 1 + Math.floor(rx * (cols - 2));
       const y = 1 + Math.floor(ry * (rows - 2));
 
-      if (grid[y][x] !== TILE_FLOOR) continue;
+      if (!isWalkableTile(grid[y][x])) continue;
 
       const dx = x - playerTileX;
       const dy = y - playerTileY;
@@ -732,114 +993,73 @@ function computeSpawnsAndWalls(
 
     const [sx, sy] = chosen ?? fallback;
     enemySpawnTiles.push([sx, sy]);
-    clearCircle(grid, sx, sy, 2);
+    clearCircleTo(grid, sx, sy, 2, TILE_FLOOR);
   }
 
   const enemySpawns: [number, number][] = enemySpawnTiles.map((t) =>
-    toPixel(t[0], t[1], MAP_TILE_SIZE),
+    toPixel(t[0], t[1], tileSize),
   );
 
-  const wallRects = buildWallRects(
-    grid as unknown as number[][],
-    MAP_TILE_SIZE,
-  );
-
-  return { playerSpawn, enemySpawns, wallRects };
+  return { playerSpawn, enemySpawns };
 }
 
-type MapDefinition = {
-  id: MapId;
-  biome: MapBiome;
-  name: string;
-  cols: number;
-  rows: number;
-  seed: number;
-  backgroundColor: number;
-  generator: (cols: number, rows: number, seed: number) => Tile[][];
-};
+export function generateMap(
+  theme: MapTheme,
+  options?: { cols?: number; rows?: number; seed?: number },
+): GeneratedMap {
+  const cols = options?.cols ?? DEFAULT_MAP_COLS;
+  const rows = options?.rows ?? DEFAULT_MAP_ROWS;
+  const tileSize = MAP_TILE_SIZE;
+  const seed = options?.seed ?? seedForTheme(theme, BASE_SEED);
 
-const MAP_DEFINITIONS: Record<MapId, MapDefinition> = {
-  forest_1: {
-    id: "forest_1",
-    biome: "forest",
-    name: getMapDisplayName("forest_1"),
-    cols: 100,
-    rows: 80,
-    seed: 1337,
-    backgroundColor: 0x0a0a0f,
-    generator: (c, r, s) => generateForestGrid(c, r, s, "normal"),
-  },
-  forest_2: {
-    id: "forest_2",
-    biome: "forest",
-    name: getMapDisplayName("forest_2"),
-    cols: 110,
-    rows: 88,
-    seed: 7331,
-    backgroundColor: 0x06080c,
-    generator: (c, r, s) => generateForestGrid(c, r, s, "deep"),
-  },
-  ice_1: {
-    id: "ice_1",
-    biome: "ice",
-    name: getMapDisplayName("ice_1"),
-    cols: 110,
-    rows: 88,
-    seed: 20210,
-    backgroundColor: 0x0b1220,
-    generator: generateIceGrid,
-  },
-  dungeon_1: {
-    id: "dungeon_1",
-    biome: "dungeon",
-    name: getMapDisplayName("dungeon_1"),
-    cols: 100,
-    rows: 80,
-    seed: 40404,
-    backgroundColor: 0x050506,
-    generator: generateDungeonGrid,
-  },
-  lava_1: {
-    id: "lava_1",
-    biome: "lava",
-    name: getMapDisplayName("lava_1"),
-    cols: 110,
-    rows: 88,
-    seed: 90010,
-    backgroundColor: 0x1a0500,
-    generator: generateLavaGrid,
-  },
-};
+  let grid: Tile[][];
+  switch (theme) {
+    case "forest":
+      grid = generateForestGrid(cols, rows, seed);
+      break;
+    case "fairy_forest":
+      grid = generateFairyForestGrid(cols, rows, seed);
+      break;
+    case "dungeon":
+      grid = generateDungeonGrid(cols, rows, seed);
+      break;
+    case "kings_hall":
+      grid = generateKingsHallGrid(cols, rows, seed);
+      break;
+    case "castle_courtyard":
+      grid = generateCourtyardGrid(cols, rows, seed);
+      break;
+    case "battlefield":
+      grid = generateBattlefieldGrid(cols, rows, seed);
+      break;
+    case "rocky_lava":
+      grid = generateRockyLavaGrid(cols, rows, seed);
+      break;
+    case "volcanic":
+      grid = generateVolcanicGrid(cols, rows, seed);
+      break;
+  }
 
-const mapCache = new Map<MapId, MapData>();
-
-export function getMapData(mapId: MapId): MapData {
-  const cached = mapCache.get(mapId);
-  if (cached) return cached;
-
-  const def = MAP_DEFINITIONS[mapId] ?? MAP_DEFINITIONS[DEFAULT_MAP_ID];
-  const grid = def.generator(def.cols, def.rows, def.seed);
-  const { playerSpawn, enemySpawns, wallRects } = computeSpawnsAndWalls(
+  const { playerSpawn, enemySpawns } = buildSpawns({
     grid,
-    def.cols,
-    def.rows,
-    def.seed,
-  );
+    cols,
+    rows,
+    tileSize,
+    seed,
+  });
+  const wallRects = buildWallRects(grid, tileSize);
+  const meta = getMapMeta(theme);
 
-  const data: MapData = {
-    id: def.id,
-    biome: def.biome,
-    name: def.name,
-    cols: def.cols,
-    rows: def.rows,
-    tileSize: MAP_TILE_SIZE,
+  return {
+    theme,
+    name: meta.name,
+    description: meta.description,
+    cols,
+    rows,
+    tileSize,
     grid,
     wallRects,
     playerSpawn,
     enemySpawns,
-    backgroundColor: def.backgroundColor,
   };
-
-  mapCache.set(mapId, data);
-  return data;
 }
